@@ -20,64 +20,78 @@ const fs = require('fs');
 const path = require('path');
 
 // =========================
-// ENV / CONFIG
+// ENV
 // =========================
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const MOD_ROLE_ID = process.env.DISCORD_MOD_ROLE_ID || null;
-
-const DROP_WINDOW_SECONDS = Number(process.env.DROP_WINDOW_SECONDS || 120);
-const RANDOM_DROP_START_HOUR_UTC = Number(process.env.RANDOM_DROP_START_HOUR_UTC || 14);
-const RANDOM_DROP_END_HOUR_UTC = Number(process.env.RANDOM_DROP_END_HOUR_UTC || 23);
+const DEFAULT_DROP_WINDOW_SECONDS = Number(process.env.DROP_WINDOW_SECONDS || 120);
+const DEFAULT_RANDOM_DROP_START_HOUR_UTC = Number(process.env.RANDOM_DROP_START_HOUR_UTC || 14);
+const DEFAULT_RANDOM_DROP_END_HOUR_UTC = Number(process.env.RANDOM_DROP_END_HOUR_UTC || 23);
 
 if (!TOKEN || !CLIENT_ID) {
-  console.error('Missing env vars: DISCORD_TOKEN or DISCORD_CLIENT_ID');
+  console.error('Missing DISCORD_TOKEN or DISCORD_CLIENT_ID');
   process.exit(1);
 }
 
 // =========================
-// STORAGE
+// FILE STORAGE
 // =========================
 const DATA_DIR = path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
+function defaultGuildConfig() {
+  return {
+    snapsChannelId: null,
+    snapsRoleId: null,
+    nextScheduledDropTs: null,
+    lastScheduledForDate: null,
+    enabled: true,
+    dropWindowSeconds: DEFAULT_DROP_WINDOW_SECONDS,
+    randomStartHourUtc: DEFAULT_RANDOM_DROP_START_HOUR_UTC,
+    randomEndHourUtc: DEFAULT_RANDOM_DROP_END_HOUR_UTC,
+    allowLatePosts: true,
+    previewEnabled: true,
+    threadsEnabled: true,
+    customMessage: 'Send **1 real-time photo** now.',
+    customEmbedTitle: 'Time to BeReal',
+    customFooter: 'Snap Bot',
+    modRoleId: null,
+  };
+}
+
 function defaultState() {
   return {
-    guilds: {},       // guildId -> config
-    members: {},      // guildId:userId -> stats
-    currentDrops: {}, // guildId -> active drop
+    guilds: {},
+    members: {},
+    currentDrops: {},
   };
 }
 
 function loadState() {
-  let s;
-
   if (!fs.existsSync(STATE_FILE)) {
-    s = defaultState();
+    const s = defaultState();
     saveState(s);
     return s;
   }
 
   try {
-    s = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    const parsed = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    if (!parsed.guilds) parsed.guilds = {};
+    if (!parsed.members) parsed.members = {};
+    if (!parsed.currentDrops) parsed.currentDrops = {};
+    return parsed;
   } catch {
-    s = defaultState();
+    const s = defaultState();
     saveState(s);
     return s;
   }
-
-  if (!s.guilds) s.guilds = {};
-  if (!s.members) s.members = {};
-  if (!s.currentDrops) s.currentDrops = {};
-
-  saveState(s);
-  return s;
 }
 
-function saveState(state) {
-  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+function saveState(s) {
+  fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2));
 }
 
 let state = loadState();
@@ -85,8 +99,8 @@ let state = loadState();
 // =========================
 // HELPERS
 // =========================
-function memberKey(guildId, userId) {
-  return `${guildId}:${userId}`;
+function nowUnix() {
+  return Math.floor(Date.now() / 1000);
 }
 
 function utcDateKeyFromMs(ms) {
@@ -97,8 +111,12 @@ function utcDateKeyFromMs(ms) {
   return `${y}-${m}-${day}`;
 }
 
-function nowUnix() {
-  return Math.floor(Date.now() / 1000);
+function memberKey(guildId, userId) {
+  return `${guildId}:${userId}`;
+}
+
+function clamp(val, min, max) {
+  return Math.min(Math.max(val, min), max);
 }
 
 function randomInt(min, max) {
@@ -107,88 +125,63 @@ function randomInt(min, max) {
 
 function ensureGuildConfig(guildId) {
   if (!state.guilds[guildId]) {
+    state.guilds[guildId] = defaultGuildConfig();
+  } else {
     state.guilds[guildId] = {
-      snapsChannelId: null,
-      snapsRoleId: null,
-      nextScheduledDropTs: null,
-      lastScheduledForDate: null,
-      enabled: true,
+      ...defaultGuildConfig(),
+      ...state.guilds[guildId],
     };
   }
-
-  if (typeof state.guilds[guildId].enabled !== 'boolean') {
-    state.guilds[guildId].enabled = true;
-  }
-
   return state.guilds[guildId];
 }
 
 function ensureMemberRecord(guildId, user) {
   const key = memberKey(guildId, user.id);
-
   if (!state.members[key]) {
     state.members[key] = {
       guildId,
       userId: user.id,
+      displayName: user.username,
       streak: 0,
-      lastOnTimeDate: null,
-      lastAnyDate: null,
       totalOnTime: 0,
       totalLate: 0,
-      displayName: user.username,
+      totalDropsSeen: 0,
+      lastOnTimeDate: null,
+      lastAnyDate: null,
     };
   } else {
     state.members[key].displayName = user.username;
   }
-
   return state.members[key];
 }
 
-function isImageAttachment(att) {
-  const ct = att.contentType || '';
-  if (ct.startsWith('image/')) return true;
-
-  const name = (att.name || '').toLowerCase();
-  return (
-    name.endsWith('.png') ||
-    name.endsWith('.jpg') ||
-    name.endsWith('.jpeg') ||
-    name.endsWith('.gif') ||
-    name.endsWith('.webp')
-  );
-}
-
-function hasModAccess(member) {
-  if (!member) return false;
-  if (member.permissions.has(PermissionsBitField.Flags.ManageGuild)) return true;
-  if (MOD_ROLE_ID && member.roles.cache.has(MOD_ROLE_ID)) return true;
-  return false;
-}
-
-function getRandomDropUnixForTodayUTC() {
+function getRandomDropUnixForTodayUTC(config) {
   const now = new Date();
   const y = now.getUTCFullYear();
   const m = now.getUTCMonth();
   const d = now.getUTCDate();
 
-  const start = Date.UTC(y, m, d, RANDOM_DROP_START_HOUR_UTC, 0, 0) / 1000;
-  const end = Date.UTC(y, m, d, RANDOM_DROP_END_HOUR_UTC, 59, 59) / 1000;
+  const startHour = clamp(config.randomStartHourUtc, 0, 23);
+  const endHour = clamp(config.randomEndHourUtc, 0, 23);
+  const low = Math.min(startHour, endHour);
+  const high = Math.max(startHour, endHour);
+
+  const start = Date.UTC(y, m, d, low, 0, 0) / 1000;
+  const end = Date.UTC(y, m, d, high, 59, 59) / 1000;
 
   return randomInt(start, end);
 }
 
 function scheduleTodayIfNeeded(guildId) {
   const config = ensureGuildConfig(guildId);
-
   if (!config.enabled) return;
   if (!config.snapsChannelId || !config.snapsRoleId) return;
 
   const todayKey = utcDateKeyFromMs(Date.now());
   if (config.lastScheduledForDate === todayKey && config.nextScheduledDropTs) return;
 
-  let ts = getRandomDropUnixForTodayUTC();
+  let ts = getRandomDropUnixForTodayUTC(config);
   const now = nowUnix();
-
   if (ts <= now + 30) ts = now + 300;
 
   config.nextScheduledDropTs = ts;
@@ -196,53 +189,99 @@ function scheduleTodayIfNeeded(guildId) {
   saveState(state);
 }
 
-function buildDropButtons(dropId) {
+function hasModAccess(member, config) {
+  if (!member) return false;
+  if (member.permissions.has(PermissionsBitField.Flags.ManageGuild)) return true;
+  if (config?.modRoleId && member.roles.cache.has(config.modRoleId)) return true;
+  if (MOD_ROLE_ID && member.roles.cache.has(MOD_ROLE_ID)) return true;
+  return false;
+}
+
+function isImageAttachment(att) {
+  const ct = att.contentType || '';
+  if (ct.startsWith('image/')) return true;
+  const name = (att.name || '').toLowerCase();
+  return ['.png', '.jpg', '.jpeg', '.gif', '.webp'].some(ext => name.endsWith(ext));
+}
+
+function createDropButtons(dropId) {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(`snap_status_sent_${dropId}`)
-        .setLabel('Sent')
+        .setCustomId(`snap_sent_${dropId}`)
+        .setLabel('Post Now')
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
-        .setCustomId(`snap_status_skip_${dropId}`)
+        .setCustomId(`snap_skip_${dropId}`)
         .setLabel('Skip')
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
-        .setCustomId(`snap_status_snooze_${dropId}`)
+        .setCustomId(`snap_snooze_${dropId}`)
         .setLabel('Snooze 10m')
-        .setStyle(ButtonStyle.Primary)
+        .setStyle(ButtonStyle.Primary),
     ),
   ];
 }
 
-function buildDropMessage(roleId, drop) {
-  return [
-    `<@&${roleId}> 📸 **Time to BeReal.**`,
-    ``,
-    `**UTC start:** <t:${drop.startTs}:F>`,
-    `**UTC end:** <t:${drop.endTs}:F>`,
-    `**Time left:** <t:${drop.endTs}:R>`,
-    ``,
-    `Send **1 real-time photo** in the thread below.`,
-    `Your photo will also be reposted as a preview in this channel.`,
-    `Late posts are allowed, but marked **late**.`,
-  ].join('\n');
+function buildDropEmbed(config, roleId, startTs, endTs, isTest = false) {
+  return new EmbedBuilder()
+    .setTitle(isTest ? `🧪 ${config.customEmbedTitle}` : `📸 ${config.customEmbedTitle}`)
+    .setDescription([
+      `<@&${roleId}>`,
+      '',
+      `**Started:** <t:${startTs}:F>`,
+      `**Ends:** <t:${endTs}:F>`,
+      `**Time left:** <t:${endTs}:R>`,
+      '',
+      config.customMessage,
+      config.threadsEnabled ? 'Use the thread below to submit your photo.' : 'Submit your photo in this channel.',
+      config.allowLatePosts ? 'Late posts are allowed and will be marked **late**.' : 'Late posts are **not allowed**.',
+    ].join('\n'))
+    .setFooter({ text: config.customFooter })
+    .setTimestamp(new Date(startTs * 1000));
 }
 
-function buildLeaderboard(guildId) {
-  const entries = Object.values(state.members)
-    .filter(rec => rec.guildId === guildId)
-    .sort((a, b) => {
-      if (b.streak !== a.streak) return b.streak - a.streak;
-      return b.totalOnTime - a.totalOnTime;
-    })
-    .slice(0, 10);
+function buildPreviewEmbed(message, submittedAt, late, streak, threadLink) {
+  return new EmbedBuilder()
+    .setTitle('New BeReal')
+    .setDescription([
+      `📸 ${message.author}`,
+      late ? '⏰ **Late submission**' : '✅ **On-time submission**',
+      `🕒 Submitted: <t:${submittedAt}:F>`,
+      threadLink ? `🧵 [Open thread](${threadLink})` : null,
+      !late ? `🔥 Streak: **${streak}**` : null,
+      message.content?.trim() ? `💬 ${message.content.trim()}` : null,
+    ].filter(Boolean).join('\n'))
+    .setImage(message.attachments.first()?.url || null)
+    .setTimestamp(new Date(message.createdTimestamp));
+}
 
-  if (!entries.length) return 'No streak data yet.';
+function buildStatusText(guildId) {
+  const config = ensureGuildConfig(guildId);
+  const active = state.currentDrops[guildId];
 
-  return entries.map((e, i) =>
-    `${i + 1}. <@${e.userId}> — streak **${e.streak}**, on-time **${e.totalOnTime}**, late **${e.totalLate}**`
-  ).join('\n');
+  if (!config.snapsChannelId || !config.snapsRoleId) {
+    return 'This server is not set up yet. Run `/setup` first.';
+  }
+
+  const lines = [
+    `Enabled: **${config.enabled ? 'Yes' : 'No'}**`,
+    `Channel: <#${config.snapsChannelId}>`,
+    `Role: <@&${config.snapsRoleId}>`,
+    `Window: **${Math.floor(config.dropWindowSeconds / 60)}m**`,
+    `Random range: **${config.randomStartHourUtc}:00–${config.randomEndHourUtc}:59 UTC**`,
+    `Threads: **${config.threadsEnabled ? 'On' : 'Off'}**`,
+    `Preview reposts: **${config.previewEnabled ? 'On' : 'Off'}**`,
+    `Late posts: **${config.allowLatePosts ? 'Allowed' : 'Blocked'}**`,
+  ];
+
+  if (active && active.active) {
+    lines.push('', `**Active drop**`, `Started: <t:${active.startTs}:F>`, `Ends: <t:${active.endTs}:F>`, `Time left: <t:${active.endTs}:R>`, `Submissions: **${Object.keys(active.submissions).length}**`);
+  } else if (config.nextScheduledDropTs) {
+    lines.push('', `Next scheduled drop: <t:${config.nextScheduledDropTs}:F>`);
+  }
+
+  return lines.join('\n');
 }
 
 function registerOnTimeSubmission(guildId, user, submittedAtMs) {
@@ -261,6 +300,7 @@ function registerOnTimeSubmission(guildId, user, submittedAtMs) {
   }
 
   rec.lastAnyDate = dayKey;
+  return rec;
 }
 
 function registerLateSubmission(guildId, user, submittedAtMs) {
@@ -271,15 +311,18 @@ function registerLateSubmission(guildId, user, submittedAtMs) {
     rec.totalLate += 1;
     rec.lastAnyDate = dayKey;
   }
+
+  return rec;
 }
 
 // =========================
-// DROP CREATION / CLOSING
+// DROP LOGIC
 // =========================
-async function createDrop(client, guildId, forcedByUserId = null) {
+async function createDrop(client, guildId, opts = {}) {
   const config = ensureGuildConfig(guildId);
+  const { forcedByUserId = null, isTest = false } = opts;
 
-  if (!config.enabled) {
+  if (!config.enabled && !isTest) {
     return { ok: false, error: 'Drops are disabled in this server.' };
   }
 
@@ -298,31 +341,40 @@ async function createDrop(client, guildId, forcedByUserId = null) {
   }
 
   const startTs = nowUnix();
-  const endTs = startTs + DROP_WINDOW_SECONDS;
+  const endTs = startTs + config.dropWindowSeconds;
   const dropId = `${guildId}-${startTs}`;
 
-  const msg = await channel.send({
-    content: buildDropMessage(config.snapsRoleId, { startTs, endTs }),
-    components: buildDropButtons(dropId),
+  const messagePayload = {
+    content: `<@&${config.snapsRoleId}>`,
+    embeds: [buildDropEmbed(config, config.snapsRoleId, startTs, endTs, isTest)],
+    components: createDropButtons(dropId),
     allowedMentions: { roles: [config.snapsRoleId] },
-  });
+  };
 
-  const thread = await msg.startThread({
-    name: `BeReal ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`,
-    autoArchiveDuration: 60,
-  });
+  const msg = await channel.send(messagePayload);
 
-  await thread.send(`Post your BeReal photo here.\nWindow closes <t:${endTs}:R>.`);
+  let thread = null;
+  if (config.threadsEnabled) {
+    thread = await msg.startThread({
+      name: `BeReal ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`,
+      autoArchiveDuration: 60,
+    }).catch(() => null);
+
+    if (thread) {
+      await thread.send(`Post your BeReal photo here. Window closes <t:${endTs}:R>.`).catch(() => {});
+    }
+  }
 
   state.currentDrops[guildId] = {
     id: dropId,
     guildId,
     active: true,
+    test: isTest,
     startTs,
     endTs,
     channelId: channel.id,
     messageId: msg.id,
-    threadId: thread.id,
+    threadId: thread?.id || null,
     roleId: config.snapsRoleId,
     forcedByUserId,
     submissions: {},
@@ -334,24 +386,23 @@ async function createDrop(client, guildId, forcedByUserId = null) {
   return { ok: true, drop: state.currentDrops[guildId] };
 }
 
-async function closeActiveDrop(client, guildId, closedByCommand = false) {
+async function closeActiveDrop(client, guildId, reason = 'closed') {
   const drop = state.currentDrops[guildId];
   if (!drop || !drop.active) return;
 
   drop.active = false;
 
   const channel = await client.channels.fetch(drop.channelId).catch(() => null);
-  const thread = await client.channels.fetch(drop.threadId).catch(() => null);
+  const thread = drop.threadId ? await client.channels.fetch(drop.threadId).catch(() => null) : null;
 
   const onTimeCount = Object.values(drop.submissions).filter(s => !s.late).length;
   const lateCount = Object.values(drop.submissions).filter(s => s.late).length;
 
-  if (thread) {
-    const closeText = closedByCommand
-      ? `🛑 **Drop stopped by admin**\nOn-time posts: **${onTimeCount}**\nLate posts: **${lateCount}**`
-      : `⏰ **Drop closed**\nOn-time posts: **${onTimeCount}**\nLate posts: **${lateCount}**`;
+  const title = reason === 'stopped' ? 'BeReal Stopped' : 'BeReal Closed';
+  const icon = reason === 'stopped' ? '🛑' : '⏰';
 
-    await thread.send(closeText).catch(() => {});
+  if (thread) {
+    await thread.send(`${icon} **${title}**\nOn-time posts: **${onTimeCount}**\nLate posts: **${lateCount}**`).catch(() => {});
     await thread.setLocked(true).catch(() => {});
   }
 
@@ -359,10 +410,13 @@ async function closeActiveDrop(client, guildId, closedByCommand = false) {
     await channel.send({
       embeds: [
         new EmbedBuilder()
-          .setTitle(closedByCommand ? 'BeReal Stopped' : 'BeReal Closed')
-          .setDescription(
-            `On-time: **${onTimeCount}**\nLate: **${lateCount}**\nStarted: <t:${drop.startTs}:F>\nEnded: <t:${nowUnix()}:F>`
-          )
+          .setTitle(title)
+          .setDescription([
+            `On-time: **${onTimeCount}**`,
+            `Late: **${lateCount}**`,
+            `Started: <t:${drop.startTs}:F>`,
+            `Ended: <t:${nowUnix()}:F>`,
+          ].join('\n'))
           .setTimestamp(new Date()),
       ],
     }).catch(() => {});
@@ -392,52 +446,95 @@ const commands = [
     .setName('setup')
     .setDescription('Set the snaps channel and role for this server')
     .addChannelOption(option =>
-      option.setName('channel')
-        .setDescription('The channel for BeReal drops')
-        .addChannelTypes(ChannelType.GuildText)
-        .setRequired(true)
+      option.setName('channel').setDescription('Channel for drops').addChannelTypes(ChannelType.GuildText).setRequired(true)
     )
     .addRoleOption(option =>
-      option.setName('role')
-        .setDescription('The role to ping for BeReal drops')
-        .setRequired(true)
+      option.setName('role').setDescription('Role to ping').setRequired(true)
+    ),
+
+  new SlashCommandBuilder().setName('resetsetup').setDescription('Reset this server setup'),
+  new SlashCommandBuilder().setName('join').setDescription('Join the snaps role'),
+  new SlashCommandBuilder().setName('leave').setDescription('Leave the snaps role'),
+  new SlashCommandBuilder().setName('dropnow').setDescription('Start a real drop now'),
+  new SlashCommandBuilder().setName('testdrop').setDescription('Send a test drop now'),
+  new SlashCommandBuilder().setName('stopdrops').setDescription('Disable automatic and manual drops'),
+  new SlashCommandBuilder().setName('startdrops').setDescription('Enable drops again'),
+  new SlashCommandBuilder().setName('snapsstatus').setDescription('Show current settings and drop status'),
+  new SlashCommandBuilder().setName('streaks').setDescription('Show the streak leaderboard'),
+  new SlashCommandBuilder().setName('mystats').setDescription('Show your BeReal stats'),
+
+  new SlashCommandBuilder()
+    .setName('setwindow')
+    .setDescription('Set the drop window in minutes')
+    .addIntegerOption(option =>
+      option.setName('minutes').setDescription('1 to 30').setRequired(true)
     ),
 
   new SlashCommandBuilder()
-    .setName('join')
-    .setDescription('Join the snaps role'),
+    .setName('setdroprange')
+    .setDescription('Set the random daily drop UTC range')
+    .addIntegerOption(option =>
+      option.setName('start_hour').setDescription('0 to 23 UTC').setRequired(true)
+    )
+    .addIntegerOption(option =>
+      option.setName('end_hour').setDescription('0 to 23 UTC').setRequired(true)
+    ),
 
   new SlashCommandBuilder()
-    .setName('leave')
-    .setDescription('Leave the snaps role'),
+    .setName('setmessage')
+    .setDescription('Set the custom drop message')
+    .addStringOption(option =>
+      option.setName('text').setDescription('Custom message text').setRequired(true)
+    ),
 
   new SlashCommandBuilder()
-    .setName('dropnow')
-    .setDescription('Start a drop now (mods only)'),
+    .setName('setmodrole')
+    .setDescription('Set a server-specific mod role for admin commands')
+    .addRoleOption(option =>
+      option.setName('role').setDescription('Role allowed to run mod commands').setRequired(true)
+    ),
 
   new SlashCommandBuilder()
-    .setName('stopdrops')
-    .setDescription('Disable BeReal drops in this server'),
+    .setName('togglepreview')
+    .setDescription('Turn preview reposts on or off')
+    .addBooleanOption(option =>
+      option.setName('enabled').setDescription('Preview reposts enabled').setRequired(true)
+    ),
 
   new SlashCommandBuilder()
-    .setName('startdrops')
-    .setDescription('Enable BeReal drops in this server'),
+    .setName('togglethreads')
+    .setDescription('Turn submission threads on or off')
+    .addBooleanOption(option =>
+      option.setName('enabled').setDescription('Threads enabled').setRequired(true)
+    ),
 
   new SlashCommandBuilder()
-    .setName('snapsstatus')
-    .setDescription('Show current drop status'),
+    .setName('togglelateposts')
+    .setDescription('Allow or block late photo submissions')
+    .addBooleanOption(option =>
+      option.setName('enabled').setDescription('Late posts allowed').setRequired(true)
+    ),
 
   new SlashCommandBuilder()
-    .setName('streaks')
-    .setDescription('Show the BeReal leaderboard'),
+    .setName('setembedtitle')
+    .setDescription('Set the drop embed title')
+    .addStringOption(option =>
+      option.setName('text').setDescription('Embed title').setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('setfooter')
+    .setDescription('Set the drop embed footer')
+    .addStringOption(option =>
+      option.setName('text').setDescription('Footer text').setRequired(true)
+    ),
+
+  new SlashCommandBuilder().setName('help').setDescription('Show snap bot help'),
 ].map(c => c.toJSON());
 
 async function registerCommands() {
   const rest = new REST({ version: '10' }).setToken(TOKEN);
-  await rest.put(
-    Routes.applicationCommands(CLIENT_ID),
-    { body: commands }
-  );
+  await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
   console.log('Global slash commands registered.');
 }
 
@@ -455,186 +552,117 @@ client.once('clientReady', async () => {
 // =========================
 // INTERACTIONS
 // =========================
-client.on('interactionCreate', async (interaction) => {
+client.on('interactionCreate', async interaction => {
   try {
     if (!interaction.inGuild()) return;
+    const guildId = interaction.guildId;
+    const config = ensureGuildConfig(guildId);
 
     if (interaction.isChatInputCommand()) {
-      const guildId = interaction.guildId;
-      const config = ensureGuildConfig(guildId);
-      const guildMember = await interaction.guild.members.fetch(interaction.user.id);
+      const member = await interaction.guild.members.fetch(interaction.user.id);
+      const admin = hasModAccess(member, config);
+      const reply = content => interaction.reply({ content, flags: MessageFlags.Ephemeral });
+
+      if (interaction.commandName === 'help') {
+        return reply([
+          '**Snap Bot Commands**',
+          '`/setup` set channel + role',
+          '`/join` / `/leave` opt in or out',
+          '`/dropnow` send a live drop',
+          '`/testdrop` send a test drop',
+          '`/snapsstatus` current status',
+          '`/mystats` your stats',
+          '`/streaks` leaderboard',
+          '`/startdrops` / `/stopdrops` control drops',
+          '`/setwindow`, `/setdroprange`, `/setmessage` customize behavior',
+          '`/togglepreview`, `/togglethreads`, `/togglelateposts` feature toggles',
+        ].join('\n'));
+      }
 
       if (interaction.commandName === 'setup') {
-        if (!guildMember.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-          return interaction.reply({
-            content: 'You need Manage Server to use this.',
-            flags: MessageFlags.Ephemeral,
-          });
+        if (!member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+          return reply('You need Manage Server to use this.');
         }
 
         const channel = interaction.options.getChannel('channel');
         const role = interaction.options.getRole('role');
 
-        if (!channel || channel.type !== ChannelType.GuildText) {
-          return interaction.reply({
-            content: 'Please choose a normal text channel.',
-            flags: MessageFlags.Ephemeral,
-          });
-        }
-
         config.snapsChannelId = channel.id;
         config.snapsRoleId = role.id;
-        config.nextScheduledDropTs = null;
-        config.lastScheduledForDate = null;
-        config.enabled = true;
-
-        saveState(state);
-        scheduleTodayIfNeeded(guildId);
-
-        return interaction.reply({
-          content: `✅ Setup saved\nChannel: <#${channel.id}>\nRole: <@&${role.id}>`,
-          flags: MessageFlags.Ephemeral,
-        });
-      }
-
-      if (interaction.commandName === 'stopdrops') {
-        if (!guildMember.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-          return interaction.reply({
-            content: 'You need Manage Server to do this.',
-            flags: MessageFlags.Ephemeral,
-          });
-        }
-
-        config.enabled = false;
-        config.nextScheduledDropTs = null;
-        config.lastScheduledForDate = null;
-
-        if (state.currentDrops[guildId]?.active) {
-          await closeActiveDrop(client, guildId, true);
-        }
-
-        saveState(state);
-
-        return interaction.reply({
-          content: '🛑 Drops are now disabled in this server.',
-          flags: MessageFlags.Ephemeral,
-        });
-      }
-
-      if (interaction.commandName === 'startdrops') {
-        if (!guildMember.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-          return interaction.reply({
-            content: 'You need Manage Server to do this.',
-            flags: MessageFlags.Ephemeral,
-          });
-        }
-
         config.enabled = true;
         config.nextScheduledDropTs = null;
         config.lastScheduledForDate = null;
-
         saveState(state);
         scheduleTodayIfNeeded(guildId);
 
-        return interaction.reply({
-          content: '✅ Drops are now enabled in this server.',
-          flags: MessageFlags.Ephemeral,
-        });
+        return reply(`✅ Setup saved\nChannel: <#${channel.id}>\nRole: <@&${role.id}>`);
+      }
+
+      if (interaction.commandName === 'resetsetup') {
+        if (!member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+          return reply('You need Manage Server to use this.');
+        }
+
+        state.guilds[guildId] = defaultGuildConfig();
+        delete state.currentDrops[guildId];
+        saveState(state);
+        return reply('✅ Setup reset for this server. Run `/setup` again.');
       }
 
       if (!config.snapsChannelId || !config.snapsRoleId) {
-        return interaction.reply({
-          content: 'This server is not set up yet. Run `/setup` first.',
-          flags: MessageFlags.Ephemeral,
-        });
+        return reply('This server is not set up yet. Run `/setup` first.');
       }
 
       if (interaction.commandName === 'join') {
         const role = await interaction.guild.roles.fetch(config.snapsRoleId).catch(() => null);
-        if (!role) {
-          return interaction.reply({
-            content: 'Configured role not found.',
-            flags: MessageFlags.Ephemeral,
-          });
-        }
-
-        await guildMember.roles.add(role);
+        if (!role) return reply('Configured role not found. Run `/setup` again.');
+        await member.roles.add(role);
         ensureMemberRecord(guildId, interaction.user);
         saveState(state);
-
-        return interaction.reply({
-          content: `You joined ${role}.`,
-          flags: MessageFlags.Ephemeral,
-        });
+        return reply(`✅ You joined ${role}.`);
       }
 
       if (interaction.commandName === 'leave') {
         const role = await interaction.guild.roles.fetch(config.snapsRoleId).catch(() => null);
-        if (!role) {
-          return interaction.reply({
-            content: 'Configured role not found.',
-            flags: MessageFlags.Ephemeral,
-          });
-        }
-
-        await guildMember.roles.remove(role).catch(() => {});
-        return interaction.reply({
-          content: `You left ${role}.`,
-          flags: MessageFlags.Ephemeral,
-        });
+        if (!role) return reply('Configured role not found. Run `/setup` again.');
+        await member.roles.remove(role).catch(() => {});
+        return reply(`✅ You left ${role}.`);
       }
 
-      if (interaction.commandName === 'dropnow') {
-        if (!hasModAccess(guildMember)) {
-          return interaction.reply({
-            content: 'You do not have permission to do that.',
-            flags: MessageFlags.Ephemeral,
-          });
-        }
+      if (interaction.commandName === 'startdrops') {
+        if (!admin) return reply('You do not have permission to do that.');
+        config.enabled = true;
+        config.nextScheduledDropTs = null;
+        config.lastScheduledForDate = null;
+        saveState(state);
+        scheduleTodayIfNeeded(guildId);
+        return reply('✅ Drops are now enabled in this server.');
+      }
 
-        const result = await createDrop(client, guildId, interaction.user.id);
-        if (!result.ok) {
-          return interaction.reply({
-            content: result.error,
-            flags: MessageFlags.Ephemeral,
-          });
+      if (interaction.commandName === 'stopdrops') {
+        if (!admin) return reply('You do not have permission to do that.');
+        config.enabled = false;
+        config.nextScheduledDropTs = null;
+        config.lastScheduledForDate = null;
+        if (state.currentDrops[guildId]?.active) {
+          await closeActiveDrop(client, guildId, 'stopped');
         }
+        saveState(state);
+        return reply('🛑 Drops are now disabled in this server.');
+      }
 
-        return interaction.reply({
-          content: `✅ Drop started.\nUTC start: <t:${result.drop.startTs}:F>\nEnds: <t:${result.drop.endTs}:R>`,
-          flags: MessageFlags.Ephemeral,
+      if (interaction.commandName === 'dropnow' || interaction.commandName === 'testdrop') {
+        if (!admin) return reply('You do not have permission to do that.');
+        const result = await createDrop(client, guildId, {
+          forcedByUserId: interaction.user.id,
+          isTest: interaction.commandName === 'testdrop',
         });
+        if (!result.ok) return reply(result.error);
+        return reply(`✅ Drop started in <#${result.drop.channelId}>\nEnds: <t:${result.drop.endTs}:R>`);
       }
 
       if (interaction.commandName === 'snapsstatus') {
-        if (!config.enabled) {
-          return interaction.reply({
-            content: 'Drops are currently disabled in this server.',
-            flags: MessageFlags.Ephemeral,
-          });
-        }
-
-        const drop = state.currentDrops[guildId];
-        if (!drop || !drop.active) {
-          const next = config.nextScheduledDropTs
-            ? `Next scheduled drop: <t:${config.nextScheduledDropTs}:F>`
-            : 'No drop scheduled.';
-          return interaction.reply({
-            content: `No active drop.\n${next}`,
-            flags: MessageFlags.Ephemeral,
-          });
-        }
-
-        const count = Object.keys(drop.submissions).length;
-        return interaction.reply({
-          content:
-            `**Active drop**\n` +
-            `Started: <t:${drop.startTs}:F>\n` +
-            `Ends: <t:${drop.endTs}:F>\n` +
-            `Time left: <t:${drop.endTs}:R>\n` +
-            `Submissions: **${count}**`,
-          flags: MessageFlags.Ephemeral,
-        });
+        return reply(buildStatusText(guildId));
       }
 
       if (interaction.commandName === 'streaks') {
@@ -643,36 +671,109 @@ client.on('interactionCreate', async (interaction) => {
           allowedMentions: { parse: [] },
         });
       }
+
+      if (interaction.commandName === 'mystats') {
+        const rec = ensureMemberRecord(guildId, interaction.user);
+        return reply([
+          `**Your Snap Stats**`,
+          `Streak: **${rec.streak}**`,
+          `On-time: **${rec.totalOnTime}**`,
+          `Late: **${rec.totalLate}**`,
+        ].join('\n'));
+      }
+
+      if (interaction.commandName === 'setwindow') {
+        if (!admin) return reply('You do not have permission to do that.');
+        const minutes = clamp(interaction.options.getInteger('minutes'), 1, 30);
+        config.dropWindowSeconds = minutes * 60;
+        saveState(state);
+        return reply(`✅ Drop window set to **${minutes} minutes**.`);
+      }
+
+      if (interaction.commandName === 'setdroprange') {
+        if (!admin) return reply('You do not have permission to do that.');
+        const start = clamp(interaction.options.getInteger('start_hour'), 0, 23);
+        const end = clamp(interaction.options.getInteger('end_hour'), 0, 23);
+        config.randomStartHourUtc = start;
+        config.randomEndHourUtc = end;
+        config.nextScheduledDropTs = null;
+        config.lastScheduledForDate = null;
+        saveState(state);
+        scheduleTodayIfNeeded(guildId);
+        return reply(`✅ Random drop range set to **${start}:00–${end}:59 UTC**.`);
+      }
+
+      if (interaction.commandName === 'setmessage') {
+        if (!admin) return reply('You do not have permission to do that.');
+        config.customMessage = interaction.options.getString('text').slice(0, 500);
+        saveState(state);
+        return reply('✅ Custom drop message updated.');
+      }
+
+      if (interaction.commandName === 'setmodrole') {
+        if (!member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+          return reply('You need Manage Server to use this.');
+        }
+        const role = interaction.options.getRole('role');
+        config.modRoleId = role.id;
+        saveState(state);
+        return reply(`✅ Mod role set to ${role}.`);
+      }
+
+      if (interaction.commandName === 'togglepreview') {
+        if (!admin) return reply('You do not have permission to do that.');
+        config.previewEnabled = interaction.options.getBoolean('enabled');
+        saveState(state);
+        return reply(`✅ Preview reposts are now **${config.previewEnabled ? 'on' : 'off'}**.`);
+      }
+
+      if (interaction.commandName === 'togglethreads') {
+        if (!admin) return reply('You do not have permission to do that.');
+        config.threadsEnabled = interaction.options.getBoolean('enabled');
+        saveState(state);
+        return reply(`✅ Threads are now **${config.threadsEnabled ? 'on' : 'off'}**.`);
+      }
+
+      if (interaction.commandName === 'togglelateposts') {
+        if (!admin) return reply('You do not have permission to do that.');
+        config.allowLatePosts = interaction.options.getBoolean('enabled');
+        saveState(state);
+        return reply(`✅ Late posts are now **${config.allowLatePosts ? 'allowed' : 'blocked'}**.`);
+      }
+
+      if (interaction.commandName === 'setembedtitle') {
+        if (!admin) return reply('You do not have permission to do that.');
+        config.customEmbedTitle = interaction.options.getString('text').slice(0, 100);
+        saveState(state);
+        return reply('✅ Embed title updated.');
+      }
+
+      if (interaction.commandName === 'setfooter') {
+        if (!admin) return reply('You do not have permission to do that.');
+        config.customFooter = interaction.options.getString('text').slice(0, 100);
+        saveState(state);
+        return reply('✅ Embed footer updated.');
+      }
     }
 
     if (interaction.isButton()) {
-      if (!interaction.inGuild()) return;
-
       const guildId = interaction.guildId;
       const drop = state.currentDrops[guildId];
       if (!drop) {
-        return interaction.reply({
-          content: 'That drop is no longer active.',
-          flags: MessageFlags.Ephemeral,
-        });
+        return interaction.reply({ content: 'That drop is no longer active.', flags: MessageFlags.Ephemeral });
       }
 
-      const [prefix, kind, action, ...rest] = interaction.customId.split('_');
+      const [prefix, action, ...rest] = interaction.customId.split('_');
       const dropId = rest.join('_');
 
-      if (prefix !== 'snap' || kind !== 'status') return;
+      if (prefix !== 'snap') return;
       if (!drop.active || drop.id !== dropId) {
-        return interaction.reply({
-          content: 'That drop is no longer active.',
-          flags: MessageFlags.Ephemeral,
-        });
+        return interaction.reply({ content: 'That drop is no longer active.', flags: MessageFlags.Ephemeral });
       }
 
       if (action === 'sent') {
-        return interaction.reply({
-          content: `Post your image in the thread: <#${drop.threadId}>`,
-          flags: MessageFlags.Ephemeral,
-        });
+        const target = drop.threadId ? `<#${drop.threadId}>` : `<#${drop.channelId}>`;
+        return interaction.reply({ content: `📸 Post your image in ${target}`, flags: MessageFlags.Ephemeral });
       }
 
       if (action === 'skip') {
@@ -680,10 +781,7 @@ client.on('interactionCreate', async (interaction) => {
           drop.skipped.push(interaction.user.id);
           saveState(state);
         }
-        return interaction.reply({
-          content: 'Marked as skipped for this drop.',
-          flags: MessageFlags.Ephemeral,
-        });
+        return interaction.reply({ content: 'Marked as skipped for this drop.', flags: MessageFlags.Ephemeral });
       }
 
       if (action === 'snooze') {
@@ -691,20 +789,13 @@ client.on('interactionCreate', async (interaction) => {
           drop.snoozed.push(interaction.user.id);
           saveState(state);
         }
-        return interaction.reply({
-          content: 'Snoozed for 10 minutes.',
-          flags: MessageFlags.Ephemeral,
-        });
+        return interaction.reply({ content: 'Snoozed for 10 minutes.', flags: MessageFlags.Ephemeral });
       }
     }
   } catch (err) {
     console.error('INTERACTION ERROR:', err);
-
     if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({
-        content: `Error: ${err.message || 'Something went wrong.'}`,
-        flags: MessageFlags.Ephemeral,
-      }).catch(() => {});
+      await interaction.reply({ content: `Error: ${err.message || 'Something went wrong.'}`, flags: MessageFlags.Ephemeral }).catch(() => {});
     }
   }
 });
@@ -712,18 +803,19 @@ client.on('interactionCreate', async (interaction) => {
 // =========================
 // MESSAGE HANDLING
 // =========================
-client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
-  if (!message.guild) return;
+client.on('messageCreate', async message => {
+  if (message.author.bot || !message.guild) return;
 
   const guildId = message.guild.id;
+  const config = ensureGuildConfig(guildId);
   const drop = state.currentDrops[guildId];
   if (!drop || !drop.active) return;
-  if (message.channel.id !== drop.threadId) return;
+
+  const validChannel = drop.threadId ? message.channel.id === drop.threadId : message.channel.id === drop.channelId;
+  if (!validChannel) return;
 
   const member = await message.guild.members.fetch(message.author.id).catch(() => null);
   if (!member) return;
-
   if (!member.roles.cache.has(drop.roleId)) {
     await message.reply('You need the snaps role to participate.').catch(() => {});
     return;
@@ -731,7 +823,6 @@ client.on('messageCreate', async (message) => {
 
   const attachments = [...message.attachments.values()];
   const imageAttachments = attachments.filter(isImageAttachment);
-
   if (!imageAttachments.length) {
     await message.reply('Please send an image attachment for your BeReal post.').catch(() => {});
     return;
@@ -744,6 +835,10 @@ client.on('messageCreate', async (message) => {
 
   const submittedAt = Math.floor(message.createdTimestamp / 1000);
   const late = submittedAt > drop.endTs;
+  if (late && !config.allowLatePosts) {
+    await message.reply('Late posts are disabled for this server.').catch(() => {});
+    return;
+  }
 
   drop.submissions[message.author.id] = {
     submittedAt,
@@ -752,45 +847,27 @@ client.on('messageCreate', async (message) => {
     previewMessageId: null,
   };
 
-  if (late) registerLateSubmission(guildId, message.author, message.createdTimestamp);
-  else registerOnTimeSubmission(guildId, message.author, message.createdTimestamp);
+  const rec = late
+    ? registerLateSubmission(guildId, message.author, message.createdTimestamp)
+    : registerOnTimeSubmission(guildId, message.author, message.createdTimestamp);
 
   saveState(state);
 
-  const rec = ensureMemberRecord(guildId, message.author);
+  await message.reply(
+    late
+      ? `⏰ Late BeReal recorded.\nSubmitted: <t:${submittedAt}:F>`
+      : `✅ On-time BeReal recorded.\nSubmitted: <t:${submittedAt}:F>\nCurrent streak: **${rec.streak}**`
+  ).catch(() => {});
 
-  const reply = late
-    ? `⏰ Late BeReal recorded.\nSubmitted: <t:${submittedAt}:F>`
-    : `✅ On-time BeReal recorded.\nSubmitted: <t:${submittedAt}:F>\nCurrent streak: **${rec.streak}**`;
-
-  await message.reply(reply).catch(() => {});
+  if (!config.previewEnabled) return;
 
   const mainChannel = await client.channels.fetch(drop.channelId).catch(() => null);
   if (!mainChannel) return;
 
-  const firstImage = imageAttachments[0];
-  const threadLink = `https://discord.com/channels/${message.guild.id}/${drop.threadId}`;
+  const threadLink = drop.threadId ? `https://discord.com/channels/${message.guild.id}/${drop.threadId}` : null;
+  const embed = buildPreviewEmbed(message, submittedAt, late, rec.streak, threadLink);
 
-  const embed = new EmbedBuilder()
-    .setTitle('New BeReal')
-    .setDescription(
-      [
-        `📸 ${message.author}`,
-        late ? '⏰ **Late submission**' : '✅ **On-time submission**',
-        `🕒 Submitted: <t:${submittedAt}:F>`,
-        `🧵 [Open thread](${threadLink})`,
-        !late ? `🔥 Streak: **${rec.streak}**` : null,
-        message.content?.trim() ? `💬 ${message.content.trim()}` : null,
-      ].filter(Boolean).join('\n')
-    )
-    .setImage(firstImage.url)
-    .setTimestamp(new Date(message.createdTimestamp));
-
-  const previewMessage = await mainChannel.send({
-    embeds: [embed],
-    allowedMentions: { parse: ['users'] },
-  }).catch(() => null);
-
+  const previewMessage = await mainChannel.send({ embeds: [embed], allowedMentions: { parse: ['users'] } }).catch(() => null);
   if (previewMessage) {
     drop.submissions[message.author.id].previewMessageId = previewMessage.id;
     saveState(state);
@@ -804,7 +881,6 @@ setInterval(async () => {
   try {
     for (const guildId of Object.keys(state.guilds)) {
       const config = ensureGuildConfig(guildId);
-
       if (!config.enabled) continue;
       if (!config.snapsChannelId || !config.snapsRoleId) continue;
 
@@ -827,7 +903,7 @@ setInterval(async () => {
       }
 
       if (activeDrop && activeDrop.active && now > activeDrop.endTs) {
-        await closeActiveDrop(client, guildId);
+        await closeActiveDrop(client, guildId, 'closed');
       }
 
       const todayKey = utcDateKeyFromMs(Date.now());
@@ -836,7 +912,7 @@ setInterval(async () => {
       }
     }
   } catch (err) {
-    console.error('Scheduler error:', err);
+    console.error('SCHEDULER ERROR:', err);
   }
 }, 15000);
 
