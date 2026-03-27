@@ -921,9 +921,9 @@ setInterval(async () => {
 // =========================
 (async () => {
   try {
-   await rest.put(
+  await rest.put(
   Routes.applicationCommands(CLIENT_ID),
-  { body: [] }
+  { body: commands }
 );
 
-console.log('🧹 Cleared ALL commands');
+console.log('✅ Commands registered');
