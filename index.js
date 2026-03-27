@@ -921,9 +921,9 @@ setInterval(async () => {
 // =========================
 (async () => {
   try {
-    await registerCommands();
-    await client.login(TOKEN);
-  } catch (err) {
-    console.error('STARTUP ERROR:', err);
-  }
-})();
+   await rest.put(
+  Routes.applicationCommands(CLIENT_ID),
+  { body: [] }
+);
+
+console.log('🧹 Cleared ALL commands');
