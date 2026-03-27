@@ -20,14 +20,19 @@ const fs = require('fs');
 const path = require('path');
 
 // =========================
-// ENV
+// ENV / CONFIG
 // =========================
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const MOD_ROLE_ID = process.env.DISCORD_MOD_ROLE_ID || null;
+
 const DEFAULT_DROP_WINDOW_SECONDS = Number(process.env.DROP_WINDOW_SECONDS || 120);
 const DEFAULT_RANDOM_DROP_START_HOUR_UTC = Number(process.env.RANDOM_DROP_START_HOUR_UTC || 14);
 const DEFAULT_RANDOM_DROP_END_HOUR_UTC = Number(process.env.RANDOM_DROP_END_HOUR_UTC || 23);
+
+const COMMAND_MODE = (process.env.COMMAND_MODE || 'dev').toLowerCase();
+const DEV_GUILD_ID = process.env.DISCORD_DEV_GUILD_ID || '';
+const CLEAR_COMMANDS_ONLY = process.env.CLEAR_COMMANDS_ONLY === 'true';
 
 if (!TOKEN || !CLIENT_ID) {
   console.error('Missing DISCORD_TOKEN or DISCORD_CLIENT_ID');
@@ -35,7 +40,7 @@ if (!TOKEN || !CLIENT_ID) {
 }
 
 // =========================
-// FILE STORAGE
+// STORAGE
 // =========================
 const DATA_DIR = path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
@@ -70,6 +75,10 @@ function defaultState() {
   };
 }
 
+function saveState(s) {
+  fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2));
+}
+
 function loadState() {
   if (!fs.existsSync(STATE_FILE)) {
     const s = defaultState();
@@ -88,10 +97,6 @@ function loadState() {
     saveState(s);
     return s;
   }
-}
-
-function saveState(s) {
-  fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2));
 }
 
 let state = loadState();
@@ -137,6 +142,7 @@ function ensureGuildConfig(guildId) {
 
 function ensureMemberRecord(guildId, user) {
   const key = memberKey(guildId, user.id);
+
   if (!state.members[key]) {
     state.members[key] = {
       guildId,
@@ -152,6 +158,7 @@ function ensureMemberRecord(guildId, user) {
   } else {
     state.members[key].displayName = user.username;
   }
+
   return state.members[key];
 }
 
@@ -174,6 +181,7 @@ function getRandomDropUnixForTodayUTC(config) {
 
 function scheduleTodayIfNeeded(guildId) {
   const config = ensureGuildConfig(guildId);
+
   if (!config.enabled) return;
   if (!config.snapsChannelId || !config.snapsRoleId) return;
 
@@ -182,6 +190,7 @@ function scheduleTodayIfNeeded(guildId) {
 
   let ts = getRandomDropUnixForTodayUTC(config);
   const now = nowUnix();
+
   if (ts <= now + 30) ts = now + 300;
 
   config.nextScheduledDropTs = ts;
@@ -200,6 +209,7 @@ function hasModAccess(member, config) {
 function isImageAttachment(att) {
   const ct = att.contentType || '';
   if (ct.startsWith('image/')) return true;
+
   const name = (att.name || '').toLowerCase();
   return ['.png', '.jpg', '.jpeg', '.gif', '.webp'].some(ext => name.endsWith(ext));
 }
@@ -276,12 +286,35 @@ function buildStatusText(guildId) {
   ];
 
   if (active && active.active) {
-    lines.push('', `**Active drop**`, `Started: <t:${active.startTs}:F>`, `Ends: <t:${active.endTs}:F>`, `Time left: <t:${active.endTs}:R>`, `Submissions: **${Object.keys(active.submissions).length}**`);
+    lines.push(
+      '',
+      `**Active drop**`,
+      `Started: <t:${active.startTs}:F>`,
+      `Ends: <t:${active.endTs}:F>`,
+      `Time left: <t:${active.endTs}:R>`,
+      `Submissions: **${Object.keys(active.submissions).length}**`
+    );
   } else if (config.nextScheduledDropTs) {
     lines.push('', `Next scheduled drop: <t:${config.nextScheduledDropTs}:F>`);
   }
 
   return lines.join('\n');
+}
+
+function buildLeaderboard(guildId) {
+  const entries = Object.values(state.members)
+    .filter(rec => rec.guildId === guildId)
+    .sort((a, b) => {
+      if (b.streak !== a.streak) return b.streak - a.streak;
+      return b.totalOnTime - a.totalOnTime;
+    })
+    .slice(0, 10);
+
+  if (!entries.length) return 'No streak data yet.';
+
+  return entries.map((e, i) =>
+    `${i + 1}. <@${e.userId}> — streak **${e.streak}**, on-time **${e.totalOnTime}**, late **${e.totalLate}**`
+  ).join('\n');
 }
 
 function registerOnTimeSubmission(guildId, user, submittedAtMs) {
@@ -344,14 +377,12 @@ async function createDrop(client, guildId, opts = {}) {
   const endTs = startTs + config.dropWindowSeconds;
   const dropId = `${guildId}-${startTs}`;
 
-  const messagePayload = {
+  const msg = await channel.send({
     content: `<@&${config.snapsRoleId}>`,
     embeds: [buildDropEmbed(config, config.snapsRoleId, startTs, endTs, isTest)],
     components: createDropButtons(dropId),
     allowedMentions: { roles: [config.snapsRoleId] },
-  };
-
-  const msg = await channel.send(messagePayload);
+  });
 
   let thread = null;
   if (config.threadsEnabled) {
@@ -532,10 +563,63 @@ const commands = [
   new SlashCommandBuilder().setName('help').setDescription('Show snap bot help'),
 ].map(c => c.toJSON());
 
+// =========================
+// COMMAND REGISTRATION
+// =========================
 async function registerCommands() {
   const rest = new REST({ version: '10' }).setToken(TOKEN);
-  await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-  console.log('Global slash commands registered.');
+
+  if (COMMAND_MODE === 'dev') {
+    if (!DEV_GUILD_ID) throw new Error('DISCORD_DEV_GUILD_ID is required in dev mode');
+
+    await rest.put(
+      Routes.applicationGuildCommands(CLIENT_ID, DEV_GUILD_ID),
+      { body: commands }
+    );
+
+    console.log(`✅ Registered DEV guild commands for ${DEV_GUILD_ID}`);
+    return;
+  }
+
+  if (COMMAND_MODE === 'global') {
+    await rest.put(
+      Routes.applicationCommands(CLIENT_ID),
+      { body: commands }
+    );
+
+    console.log('✅ Registered GLOBAL commands');
+    return;
+  }
+
+  throw new Error(`Invalid COMMAND_MODE: ${COMMAND_MODE}`);
+}
+
+async function clearCommands() {
+  const rest = new REST({ version: '10' }).setToken(TOKEN);
+
+  if (COMMAND_MODE === 'dev') {
+    if (!DEV_GUILD_ID) throw new Error('DISCORD_DEV_GUILD_ID is required in dev mode');
+
+    await rest.put(
+      Routes.applicationGuildCommands(CLIENT_ID, DEV_GUILD_ID),
+      { body: [] }
+    );
+
+    console.log(`🧹 Cleared DEV guild commands for ${DEV_GUILD_ID}`);
+    return;
+  }
+
+  if (COMMAND_MODE === 'global') {
+    await rest.put(
+      Routes.applicationCommands(CLIENT_ID),
+      { body: [] }
+    );
+
+    console.log('🧹 Cleared GLOBAL commands');
+    return;
+  }
+
+  throw new Error(`Invalid COMMAND_MODE: ${COMMAND_MODE}`);
 }
 
 // =========================
@@ -555,6 +639,7 @@ client.once('clientReady', async () => {
 client.on('interactionCreate', async interaction => {
   try {
     if (!interaction.inGuild()) return;
+
     const guildId = interaction.guildId;
     const config = ensureGuildConfig(guildId);
 
@@ -795,7 +880,10 @@ client.on('interactionCreate', async interaction => {
   } catch (err) {
     console.error('INTERACTION ERROR:', err);
     if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: `Error: ${err.message || 'Something went wrong.'}`, flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.reply({
+        content: `Error: ${err.message || 'Something went wrong.'}`,
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
     }
   }
 });
@@ -816,6 +904,7 @@ client.on('messageCreate', async message => {
 
   const member = await message.guild.members.fetch(message.author.id).catch(() => null);
   if (!member) return;
+
   if (!member.roles.cache.has(drop.roleId)) {
     await message.reply('You need the snaps role to participate.').catch(() => {});
     return;
@@ -823,6 +912,7 @@ client.on('messageCreate', async message => {
 
   const attachments = [...message.attachments.values()];
   const imageAttachments = attachments.filter(isImageAttachment);
+
   if (!imageAttachments.length) {
     await message.reply('Please send an image attachment for your BeReal post.').catch(() => {});
     return;
@@ -835,6 +925,7 @@ client.on('messageCreate', async message => {
 
   const submittedAt = Math.floor(message.createdTimestamp / 1000);
   const late = submittedAt > drop.endTs;
+
   if (late && !config.allowLatePosts) {
     await message.reply('Late posts are disabled for this server.').catch(() => {});
     return;
@@ -867,7 +958,11 @@ client.on('messageCreate', async message => {
   const threadLink = drop.threadId ? `https://discord.com/channels/${message.guild.id}/${drop.threadId}` : null;
   const embed = buildPreviewEmbed(message, submittedAt, late, rec.streak, threadLink);
 
-  const previewMessage = await mainChannel.send({ embeds: [embed], allowedMentions: { parse: ['users'] } }).catch(() => null);
+  const previewMessage = await mainChannel.send({
+    embeds: [embed],
+    allowedMentions: { parse: ['users'] },
+  }).catch(() => null);
+
   if (previewMessage) {
     drop.submissions[message.author.id].previewMessageId = previewMessage.id;
     saveState(state);
@@ -921,9 +1016,14 @@ setInterval(async () => {
 // =========================
 (async () => {
   try {
-  await rest.put(
-  Routes.applicationCommands(CLIENT_ID),
-  { body: commands }
-);
+    if (CLEAR_COMMANDS_ONLY) {
+      await clearCommands();
+      process.exit(0);
+    }
 
-console.log('✅ Commands registered');
+    await registerCommands();
+    await client.login(TOKEN);
+  } catch (err) {
+    console.error('STARTUP ERROR:', err);
+  }
+})();
