@@ -1,14 +1,16 @@
-
 {
-  "name": "discord-snaps-bot",
+  "name": "snap-bot",
   "version": "1.0.0",
-  "description": "BeReal-style Discord bot",
+  "description": "Discord snap bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^14.14.1",
+    "discord.js": "^14.19.3",
     "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": "20.x"
   }
 }

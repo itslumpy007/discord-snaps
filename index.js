@@ -29,29 +29,28 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
-/*
-  CONFIG
-*/
 const config = {
   snapChannelName: "snap",
   maxDropsPerDay: 3,
   cooldownMinutes: 10,
   autoDeleteHours: 24,
   vipRoleName: "Snap VIP",
-  allowTextCaptionOnly: false, // false = must include attachment
+  allowTextCaptionOnly: false,
 };
 
 const userData = new Map();
 /*
-userData structure:
-userId: {
-  dailyCount: number,
-  dailyResetAt: number,
-  lastDropAt: number,
-  totalDrops: number,
-  streak: number,
-  bestStreak: number,
-  lastDropDayKey: string
+userData:
+{
+  userId: {
+    dailyCount,
+    dailyResetAt,
+    lastDropAt,
+    totalDrops,
+    streak,
+    bestStreak,
+    lastDropDayKey
+  }
 }
 */
 
@@ -69,7 +68,12 @@ function getDayKey(timestamp = Date.now()) {
 
 function getTomorrowUtcMidnight() {
   const d = new Date();
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, 0, 0, 0, 0);
+  return Date.UTC(
+    d.getUTCFullYear(),
+    d.getUTCMonth(),
+    d.getUTCDate() + 1,
+    0, 0, 0, 0
+  );
 }
 
 function getUserEntry(userId) {
@@ -208,6 +212,7 @@ client.on("messageCreate", async (message) => {
     if (message.channel.name !== config.snapChannelName) return;
 
     const hasAttachment = message.attachments.size > 0;
+
     if (!hasAttachment && !config.allowTextCaptionOnly) {
       await message.reply("📸 You need to attach a photo or video to drop a snap.");
       return;
@@ -249,13 +254,18 @@ client.on("messageCreate", async (message) => {
       .setDescription(`**From:** ${message.author}\n**Caption:** ${caption}`)
       .addFields(
         { name: "🔥 Current Streak", value: `${entry.streak}`, inline: true },
-        { name: "📦 Daily Drops", value: `${entry.dailyCount}/${isVip ? "∞" : config.maxDropsPerDay}`, inline: true },
+        {
+          name: "📦 Daily Drops",
+          value: `${entry.dailyCount}/${isVip ? "∞" : config.maxDropsPerDay}`,
+          inline: true,
+        },
         { name: "🏆 Total Drops", value: `${entry.totalDrops}`, inline: true }
       )
       .setTimestamp();
 
-    if (message.attachments.first()?.contentType?.startsWith("image/")) {
-      embed.setImage(message.attachments.first().url);
+    const firstAttachment = message.attachments.first();
+    if (firstAttachment?.contentType?.startsWith("image/")) {
+      embed.setImage(firstAttachment.url);
     }
 
     const sent = await message.channel.send({
@@ -274,7 +284,6 @@ client.on("messageCreate", async (message) => {
     try {
       await message.delete();
     } catch {}
-
   } catch (err) {
     console.error("messageCreate error:", err);
   }
@@ -344,10 +353,12 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.commandName === "setdrops") {
       const amount = interaction.options.getInteger("amount");
+
       if (amount < 1) {
         await interaction.reply({ content: "Amount must be at least 1.", ephemeral: true });
         return;
       }
+
       config.maxDropsPerDay = amount;
       await interaction.reply(`✅ Max drops per day set to **${amount}**`);
       return;
@@ -355,10 +366,12 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.commandName === "setcooldown") {
       const minutes = interaction.options.getInteger("minutes");
+
       if (minutes < 0) {
         await interaction.reply({ content: "Cooldown cannot be negative.", ephemeral: true });
         return;
       }
+
       config.cooldownMinutes = minutes;
       await interaction.reply(`✅ Cooldown set to **${minutes} minute(s)**`);
       return;
@@ -366,10 +379,12 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.commandName === "setautodelete") {
       const hours = interaction.options.getInteger("hours");
+
       if (hours < 1) {
         await interaction.reply({ content: "Hours must be at least 1.", ephemeral: true });
         return;
       }
+
       config.autoDeleteHours = hours;
       await interaction.reply(`✅ Auto-delete set to **${hours} hour(s)**`);
       return;
@@ -402,9 +417,15 @@ client.on("interactionCreate", async (interaction) => {
     console.error("interactionCreate error:", err);
 
     if (interaction.deferred || interaction.replied) {
-      await interaction.followUp({ content: "There was an error running that command.", ephemeral: true }).catch(() => {});
+      await interaction.followUp({
+        content: "There was an error running that command.",
+        ephemeral: true,
+      }).catch(() => {});
     } else {
-      await interaction.reply({ content: "There was an error running that command.", ephemeral: true }).catch(() => {});
+      await interaction.reply({
+        content: "There was an error running that command.",
+        ephemeral: true,
+      }).catch(() => {});
     }
   }
 });
