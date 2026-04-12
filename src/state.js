@@ -178,6 +178,19 @@ class StateStore {
   listGuildMembers(guildId) {
     return Object.values(this.state.members).filter((member) => member.guildId === guildId);
   }
+
+  resetGuild(guildId) {
+    delete this.state.guilds[guildId];
+    delete this.state.currentDrops[guildId];
+
+    for (const key of Object.keys(this.state.members)) {
+      if (this.state.members[key]?.guildId === guildId) {
+        delete this.state.members[key];
+      }
+    }
+
+    this.save();
+  }
 }
 
 module.exports = {

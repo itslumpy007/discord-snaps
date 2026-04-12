@@ -520,6 +520,16 @@ class SnapManager {
     });
     return true;
   }
+
+  resetGuildState(guildId) {
+    if (this.activeTimers.has(guildId)) {
+      clearTimeout(this.activeTimers.get(guildId));
+      this.activeTimers.delete(guildId);
+    }
+
+    this.clearReminderTimers(guildId);
+    this.store.resetGuild(guildId);
+  }
 }
 
 module.exports = {

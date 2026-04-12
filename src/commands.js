@@ -123,6 +123,16 @@ function buildCommands() {
       .setName("snaprecap")
       .setDescription("Post a weekly recap immediately")
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    new SlashCommandBuilder()
+      .setName("snapreset")
+      .setDescription("Reset this server's snap bot state")
+      .addStringOption((option) =>
+        option
+          .setName("confirm")
+          .setDescription("Type RESET to confirm wiping this server's snap data")
+          .setRequired(true)
+      )
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
   ].map((command) => command.toJSON());
 }
 
@@ -484,6 +494,25 @@ async function handleCommand(interaction, manager, store) {
   if (interaction.commandName === "snaprecap") {
     const sent = await manager.maybeSendWeeklyRecap(interaction.guildId, true);
     await interaction.reply(sent ? "Weekly recap posted." : "Weekly recap could not be posted right now.");
+    return true;
+  }
+
+  if (interaction.commandName === "snapreset") {
+    const confirm = interaction.options.getString("confirm", true);
+    if (confirm !== "RESET") {
+      await interaction.reply({
+        content: "Reset cancelled. Type exactly `RESET` in the `confirm` field to wipe this server's snap bot state.",
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    manager.resetGuildState(interaction.guildId);
+    await interaction.reply({
+      content:
+        "This server's snap bot state has been reset. All tracked stats, config, and active drop data for this server were removed.",
+      ephemeral: true,
+    });
     return true;
   }
 

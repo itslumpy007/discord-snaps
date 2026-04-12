@@ -241,6 +241,15 @@ class DashboardService {
       return { sent };
     }
 
+    if (action === "reset-guild") {
+      if (payload.confirm !== "RESET") {
+        throw new Error("Reset cancelled. Confirmation text did not match.");
+      }
+
+      this.manager.resetGuildState(guildId);
+      return { reset: true };
+    }
+
     throw new Error("Unknown action.");
   }
 

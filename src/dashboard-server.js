@@ -535,6 +535,7 @@ function renderDashboardHtml() {
               <button data-action="reopen-drop" class="action-button">Reopen Drop</button>
               <button data-action="reroll-drop" class="action-button">Reroll Next</button>
               <button data-action="post-recap" class="action-button">Post Recap</button>
+              <button data-action="reset-guild" class="action-button">Reset Server</button>
             </div>
             <div style="margin-top: 14px;">
               <label>
@@ -902,13 +903,27 @@ async function runAction(action, extra) {
     return;
   }
 
+  const payload = { action, ...extra };
+  if (action === "reset-guild") {
+    const confirm = window.prompt('Type RESET to wipe this server\\'s snap bot data.');
+    if (confirm !== "RESET") {
+      notice("Reset cancelled.");
+      return;
+    }
+
+    payload.confirm = confirm;
+  }
+
   const result = await api("/api/guilds/" + state.selectedGuildId + "/actions", {
     method: "POST",
-    body: JSON.stringify({ action, ...extra }),
+    body: JSON.stringify(payload),
   });
 
   if (action === "post-recap") {
     notice(result.result?.sent ? "Weekly recap posted." : "Weekly recap was not posted.");
+  } else if (action === "reset-guild") {
+    notice("Server snap state reset.");
+    state.overview = null;
   } else {
     notice("Action completed.");
   }
