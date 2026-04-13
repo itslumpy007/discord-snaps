@@ -115,6 +115,10 @@ class DashboardService {
       next.rewardRoleId = updates.rewardRoleId || null;
     }
 
+    if (updates.joinRoleId !== undefined) {
+      next.joinRoleId = updates.joinRoleId || null;
+    }
+
     if (updates.timeZone !== undefined) {
       if (!isValidTimeZone(updates.timeZone)) {
         throw new Error("Invalid timezone.");

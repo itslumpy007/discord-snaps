@@ -101,6 +101,13 @@ function buildCommands() {
       )
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
     new SlashCommandBuilder()
+      .setName("snapjoinrole")
+      .setDescription("Configure the opt-in join role for members")
+      .addRoleOption((option) =>
+        option.setName("role").setDescription("Role members receive with /snapjoin").setRequired(true)
+      )
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    new SlashCommandBuilder()
       .setName("snapconfig")
       .setDescription("View the current server snap configuration"),
     new SlashCommandBuilder()
@@ -112,6 +119,12 @@ function buildCommands() {
     new SlashCommandBuilder()
       .setName("snapleaderboard")
       .setDescription("Show the top snap streaks in this server"),
+    new SlashCommandBuilder()
+      .setName("snapjoin")
+      .setDescription("Join the snap role for this server"),
+    new SlashCommandBuilder()
+      .setName("snapleave")
+      .setDescription("Leave the snap role for this server"),
     new SlashCommandBuilder()
       .setName("snapsnooze")
       .setDescription("Mark yourself snoozed for the currently active drop"),
@@ -352,6 +365,15 @@ async function handleCommand(interaction, manager, store) {
     return true;
   }
 
+  if (interaction.commandName === "snapjoinrole") {
+    const role = interaction.options.getRole("role", true);
+    store.updateGuild(interaction.guildId, {
+      joinRoleId: role.id,
+    });
+    await interaction.reply(`Members can now use \`/snapjoin\` to get ${role} and \`/snapleave\` to remove it.`);
+    return true;
+  }
+
   if (interaction.commandName === "snapconfig") {
     const currentDrop = store.getCurrentDrop(interaction.guildId);
     const actions = new ActionRowBuilder().addComponents(
@@ -396,6 +418,11 @@ async function handleCommand(interaction, manager, store) {
         value: guildConfig.rewardRoleId
           ? `<@&${guildConfig.rewardRoleId}> at ${guildConfig.rewardThreshold}+ streak`
           : "Not configured",
+        inline: false,
+      },
+      {
+        name: "Join Role",
+        value: guildConfig.joinRoleId ? `<@&${guildConfig.joinRoleId}>` : "Not configured",
         inline: false,
       },
       {
@@ -463,6 +490,49 @@ async function handleCommand(interaction, manager, store) {
     );
 
     await interaction.reply({ embeds: [embed] });
+    return true;
+  }
+
+  if (interaction.commandName === "snapjoin" || interaction.commandName === "snapleave") {
+    if (!guildConfig.joinRoleId) {
+      await interaction.reply({
+        content: "This server does not have a join role configured yet. Ask an admin to run `/snapjoinrole`.",
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    const role = await interaction.guild.roles.fetch(guildConfig.joinRoleId).catch(() => null);
+    const member =
+      interaction.guild.members.cache.get(interaction.user.id) ||
+      (await interaction.guild.members.fetch(interaction.user.id).catch(() => null));
+
+    if (!role || !member) {
+      await interaction.reply({
+        content: "The join role is missing or I couldn't load your member record.",
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    if (interaction.commandName === "snapjoin") {
+      if (member.roles.cache.has(role.id)) {
+        await interaction.reply({ content: `You already have ${role}.`, ephemeral: true });
+        return true;
+      }
+
+      await member.roles.add(role).catch(() => null);
+      await interaction.reply({ content: `You have been added to ${role}.`, ephemeral: true });
+      return true;
+    }
+
+    if (!member.roles.cache.has(role.id)) {
+      await interaction.reply({ content: `You do not currently have ${role}.`, ephemeral: true });
+      return true;
+    }
+
+    await member.roles.remove(role).catch(() => null);
+    await interaction.reply({ content: `You have been removed from ${role}.`, ephemeral: true });
     return true;
   }
 

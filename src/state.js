@@ -72,6 +72,7 @@ class StateStore {
         lastWeeklyRecapWeekKey: null,
         rewardRoleId: null,
         rewardThreshold: this.defaults.rewardThreshold,
+        joinRoleId: null,
         lastClosedDrop: null,
       };
       this.save();
@@ -108,6 +109,7 @@ class StateStore {
     guild.weeklyRecapEnabled = guild.weeklyRecapEnabled !== false;
     guild.lastWeeklyRecapWeekKey = guild.lastWeeklyRecapWeekKey ?? null;
     guild.rewardRoleId = guild.rewardRoleId ?? null;
+    guild.joinRoleId = guild.joinRoleId ?? null;
     guild.rewardThreshold =
       Number.isInteger(guild.rewardThreshold) && guild.rewardThreshold > 0
         ? guild.rewardThreshold

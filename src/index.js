@@ -12,6 +12,11 @@ async function registerCommands(token, clientId, guildIds) {
   const commands = buildCommands();
   const rest = new REST({ version: "10" }).setToken(token);
 
+  // Clear any old global commands so stale legacy slash commands stop showing up.
+  await rest.put(Routes.applicationCommands(clientId), {
+    body: [],
+  });
+
   await Promise.all(
     guildIds.map((guildId) =>
       rest.put(Routes.applicationGuildCommands(clientId, guildId), {

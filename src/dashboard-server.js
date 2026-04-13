@@ -576,6 +576,9 @@ function renderDashboardHtml() {
             <label>Reward Role
               <select name="rewardRoleId" id="reward-role-select"></select>
             </label>
+            <label>Join Role
+              <select name="joinRoleId" id="join-role-select"></select>
+            </label>
             <label>Reward Threshold
               <input name="rewardThreshold" id="reward-threshold-input" type="number" min="1" max="365" />
             </label>
@@ -642,6 +645,7 @@ const el = {
   channelSelect: document.getElementById("channel-select"),
   roleSelect: document.getElementById("role-select"),
   rewardRoleSelect: document.getElementById("reward-role-select"),
+  joinRoleSelect: document.getElementById("join-role-select"),
   timezoneInput: document.getElementById("timezone-input"),
   startHourInput: document.getElementById("start-hour-input"),
   endHourInput: document.getElementById("end-hour-input"),
@@ -815,6 +819,7 @@ function renderOverview() {
   renderSelect(el.channelSelect, data.channels, data.config.snapsChannelId, "Select a channel");
   renderSelect(el.roleSelect, data.roles, data.config.snapsRoleId, "Select a role");
   renderSelect(el.rewardRoleSelect, data.roles, data.config.rewardRoleId, "No reward role");
+  renderSelect(el.joinRoleSelect, data.roles, data.config.joinRoleId, "No join role");
   el.timezoneInput.value = data.config.timeZone || "";
   el.startHourInput.value = data.config.dailyWindowStartHourLocal ?? "";
   el.endHourInput.value = data.config.dailyWindowEndHourLocal ?? "";
@@ -880,6 +885,7 @@ async function saveConfig() {
     snapsChannelId: el.channelSelect.value || null,
     snapsRoleId: el.roleSelect.value || null,
     rewardRoleId: el.rewardRoleSelect.value || null,
+    joinRoleId: el.joinRoleSelect.value || null,
     timeZone: el.timezoneInput.value.trim(),
     dailyWindowStartHourLocal: el.startHourInput.value,
     dailyWindowEndHourLocal: el.endHourInput.value,
