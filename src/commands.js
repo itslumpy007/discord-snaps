@@ -32,6 +32,9 @@ function buildCommands() {
       .addIntegerOption((option) =>
         option.setName("duration_minutes").setDescription("Drop duration in minutes").setRequired(false)
       )
+      .addIntegerOption((option) =>
+        option.setName("drops_per_day").setDescription("How many random drops happen per day").setRequired(false)
+      )
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
     new SlashCommandBuilder()
       .setName("snapwindow")
@@ -44,6 +47,9 @@ function buildCommands() {
       )
       .addIntegerOption((option) =>
         option.setName("duration_minutes").setDescription("Drop duration in minutes").setRequired(false)
+      )
+      .addIntegerOption((option) =>
+        option.setName("drops_per_day").setDescription("How many random drops happen per day").setRequired(false)
       )
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
     new SlashCommandBuilder()
@@ -163,18 +169,20 @@ async function handleCommand(interaction, manager, store) {
     const startHour = interaction.options.getInteger("start_hour");
     const endHour = interaction.options.getInteger("end_hour");
     const durationMinutes = interaction.options.getInteger("duration_minutes");
+    const dropsPerDay = interaction.options.getInteger("drops_per_day");
 
-    if (!channel && !role && !timeZone && startHour === null && endHour === null && durationMinutes === null) {
+    if (!channel && !role && !timeZone && startHour === null && endHour === null && durationMinutes === null && dropsPerDay === null) {
       const checklist = [
         guildConfig.snapsChannelId ? "Channel configured" : "Channel missing",
         guildConfig.snapsRoleId ? "Role configured" : "Role missing",
         guildConfig.timeZone ? `Timezone: ${guildConfig.timeZone}` : "Timezone missing",
         `Window: ${guildConfig.dailyWindowStartHourLocal}:00-${guildConfig.dailyWindowEndHourLocal}:59`,
         `Duration: ${guildConfig.dropDurationMinutes} minute(s)`,
+        `Drops per day: ${guildConfig.dropsPerDay}`,
       ];
       await interaction.reply({
         embeds: [
-          buildBaseEmbed("Snap Setup Guide").setDescription(checklist.map((line) => `- ${line}`).join("\n")),
+          buildBaseEmbed("BeReal Setup Guide").setDescription(checklist.map((line) => `- ${line}`).join("\n")),
         ],
         ephemeral: true,
       });
@@ -193,13 +201,15 @@ async function handleCommand(interaction, manager, store) {
       dailyWindowStartHourLocal: startHour ?? guildConfig.dailyWindowStartHourLocal,
       dailyWindowEndHourLocal: endHour ?? guildConfig.dailyWindowEndHourLocal,
       dropDurationMinutes: durationMinutes ?? guildConfig.dropDurationMinutes,
+      dropsPerDay: dropsPerDay ?? guildConfig.dropsPerDay,
       nextScheduledDropTs: null,
       lastScheduledForDate: null,
+      scheduledDropHistory: [],
     });
     manager.ensureScheduledDrop(interaction.guildId);
 
     await interaction.reply(
-      `Snap 2.0 is configured with ${channel ?? (guildConfig.snapsChannelId ? `<#${guildConfig.snapsChannelId}>` : "no channel yet")}, ${role ?? (guildConfig.snapsRoleId ? `<@&${guildConfig.snapsRoleId}>` : "no role yet")}, timezone **${timeZone ?? guildConfig.timeZone}**, and a ${startHour ?? guildConfig.dailyWindowStartHourLocal}:00-${endHour ?? guildConfig.dailyWindowEndHourLocal}:59 window.`
+      `Your BeReal-style setup is configured with ${channel ?? (guildConfig.snapsChannelId ? `<#${guildConfig.snapsChannelId}>` : "no channel yet")}, ${role ?? (guildConfig.snapsRoleId ? `<@&${guildConfig.snapsRoleId}>` : "no role yet")}, timezone **${timeZone ?? guildConfig.timeZone}**, a ${startHour ?? guildConfig.dailyWindowStartHourLocal}:00-${endHour ?? guildConfig.dailyWindowEndHourLocal}:59 window, and **${dropsPerDay ?? guildConfig.dropsPerDay}** drop(s) per day.`
     );
     return true;
   }
@@ -208,6 +218,7 @@ async function handleCommand(interaction, manager, store) {
     const startHour = interaction.options.getInteger("start_hour", true);
     const endHour = interaction.options.getInteger("end_hour", true);
     const durationMinutes = interaction.options.getInteger("duration_minutes") ?? guildConfig.dropDurationMinutes;
+    const dropsPerDay = interaction.options.getInteger("drops_per_day") ?? guildConfig.dropsPerDay;
 
     if (startHour < 0 || startHour > 23 || endHour < 0 || endHour > 23) {
       await interaction.reply({ content: "Hours must be between 0 and 23 UTC.", ephemeral: true });
@@ -219,17 +230,24 @@ async function handleCommand(interaction, manager, store) {
       return true;
     }
 
+    if (dropsPerDay < 1 || dropsPerDay > 10) {
+      await interaction.reply({ content: "Drops per day must be between 1 and 10.", ephemeral: true });
+      return true;
+    }
+
     store.updateGuild(interaction.guildId, {
       dailyWindowStartHourLocal: startHour,
       dailyWindowEndHourLocal: endHour,
       dropDurationMinutes: durationMinutes,
+      dropsPerDay,
       nextScheduledDropTs: null,
       lastScheduledForDate: null,
+      scheduledDropHistory: [],
     });
     const next = manager.ensureScheduledDrop(interaction.guildId);
 
     await interaction.reply(
-      `Daily window updated to ${startHour}:00-${endHour}:59 in **${store.getGuild(interaction.guildId).timeZone}** with ${durationMinutes} minute drops. Next auto drop: <t:${next.nextScheduledDropTs}:F>.`
+      `Daily BeReal window updated to ${startHour}:00-${endHour}:59 in **${store.getGuild(interaction.guildId).timeZone}** with a ${durationMinutes} minute posting window and **${dropsPerDay}** drop(s) per day. Next auto drop: <t:${next.nextScheduledDropTs}:F>.`
     );
     return true;
   }
@@ -290,7 +308,7 @@ async function handleCommand(interaction, manager, store) {
         forcedByUserId: interaction.user.id,
         isScheduled: false,
       });
-      await interaction.reply(`Manual drop started in <#${drop.threadId}> and closes <t:${drop.endTs}:R>.`);
+      await interaction.reply(`Manual BeReal moment started in <#${drop.threadId}> and closes <t:${drop.endTs}:R>.`);
     } catch (error) {
       await interaction.reply({ content: error.message, ephemeral: true });
     }
@@ -308,7 +326,7 @@ async function handleCommand(interaction, manager, store) {
     currentDrop.endTs = unixNow();
     store.setCurrentDrop(interaction.guildId, currentDrop);
     await manager.finalizeDrop(interaction.guildId);
-    await interaction.reply("The current snap drop has been closed.");
+    await interaction.reply("The current BeReal moment has been closed.");
     return true;
   }
 
@@ -321,7 +339,7 @@ async function handleCommand(interaction, manager, store) {
 
     try {
       const drop = await manager.extendDrop(interaction.guildId, minutes);
-      await interaction.reply(`The active drop now closes <t:${drop.endTs}:R>.`);
+      await interaction.reply(`The active BeReal moment now closes <t:${drop.endTs}:R>.`);
     } catch (error) {
       await interaction.reply({ content: error.message, ephemeral: true });
     }
@@ -331,7 +349,7 @@ async function handleCommand(interaction, manager, store) {
   if (interaction.commandName === "snapreopen") {
     try {
       const drop = await manager.reopenLastClosedDrop(interaction.guildId);
-      await interaction.reply(`The last drop has been reopened in <#${drop.threadId}> for 5 minutes.`);
+      await interaction.reply(`The last BeReal moment has been reopened in <#${drop.threadId}> for 5 minutes.`);
     } catch (error) {
       await interaction.reply({ content: error.message, ephemeral: true });
     }
@@ -381,7 +399,7 @@ async function handleCommand(interaction, manager, store) {
       new ButtonBuilder().setCustomId("snap:mystats").setLabel("My Stats").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId("snap:reroll").setLabel("Reroll Next Drop").setStyle(ButtonStyle.Secondary)
     );
-    const embed = buildBaseEmbed("Snap 2.0 Config").addFields(
+    const embed = buildBaseEmbed("BeReal Style Config").addFields(
       { name: "Enabled", value: guildConfig.enabled ? "Yes" : "No", inline: true },
       {
         name: "Channel",
@@ -406,6 +424,11 @@ async function handleCommand(interaction, manager, store) {
       {
         name: "Drop Duration",
         value: `${guildConfig.dropDurationMinutes} minute(s)`,
+        inline: true,
+      },
+      {
+        name: "Drops / Day",
+        value: `${guildConfig.dropsPerDay}`,
         inline: true,
       },
       {
@@ -450,7 +473,7 @@ async function handleCommand(interaction, manager, store) {
       (await interaction.guild.members.fetch(user.id).catch(() => null));
     const entry = store.getMember(interaction.guildId, user.id, member?.displayName || user.username);
 
-    const embed = buildBaseEmbed(`Snap Stats: ${entry.displayName}`).addFields(
+    const embed = buildBaseEmbed(`BeReal Stats: ${entry.displayName}`).addFields(
       { name: "On-Time", value: `${entry.totalOnTime}`, inline: true },
       { name: "Late", value: `${entry.totalLate}`, inline: true },
       { name: "Missed", value: `${entry.totalMissed || 0}`, inline: true },
@@ -480,7 +503,7 @@ async function handleCommand(interaction, manager, store) {
       return true;
     }
 
-    const embed = buildBaseEmbed("Snap Leaderboard").setDescription(
+    const embed = buildBaseEmbed("BeReal Leaderboard").setDescription(
       members
         .map(
           (member, index) =>
@@ -612,7 +635,7 @@ async function handleComponent(interaction, manager, store) {
     );
     await interaction.reply({
       embeds: [
-        buildBaseEmbed(`Snap Stats: ${entry.displayName}`).setDescription(
+        buildBaseEmbed(`BeReal Stats: ${entry.displayName}`).setDescription(
           `On-time: **${entry.totalOnTime}**\nLate: **${entry.totalLate}**\nMissed: **${entry.totalMissed || 0}**\nCurrent streak: **${entry.streak}**\nBest streak: **${entry.bestStreak || 0}**`
         ),
       ],

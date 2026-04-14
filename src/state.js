@@ -68,11 +68,13 @@ class StateStore {
         dailyWindowStartHourLocal: this.defaults.dailyWindowStartHourLocal,
         dailyWindowEndHourLocal: this.defaults.dailyWindowEndHourLocal,
         reminderMinutesBeforeEnd: [...this.defaults.reminderMinutesBeforeEnd],
+        dropsPerDay: this.defaults.dropsPerDay,
         weeklyRecapEnabled: true,
         lastWeeklyRecapWeekKey: null,
         rewardRoleId: null,
         rewardThreshold: this.defaults.rewardThreshold,
         joinRoleId: null,
+        scheduledDropHistory: [],
         lastClosedDrop: null,
       };
       this.save();
@@ -106,10 +108,17 @@ class StateStore {
     guild.reminderMinutesBeforeEnd = Array.isArray(guild.reminderMinutesBeforeEnd)
       ? guild.reminderMinutesBeforeEnd.filter((value) => Number.isInteger(value) && value > 0).sort((a, b) => b - a)
       : [...this.defaults.reminderMinutesBeforeEnd];
+    guild.dropsPerDay =
+      Number.isInteger(guild.dropsPerDay) && guild.dropsPerDay > 0
+        ? guild.dropsPerDay
+        : this.defaults.dropsPerDay;
     guild.weeklyRecapEnabled = guild.weeklyRecapEnabled !== false;
     guild.lastWeeklyRecapWeekKey = guild.lastWeeklyRecapWeekKey ?? null;
     guild.rewardRoleId = guild.rewardRoleId ?? null;
     guild.joinRoleId = guild.joinRoleId ?? null;
+    guild.scheduledDropHistory = Array.isArray(guild.scheduledDropHistory)
+      ? guild.scheduledDropHistory.slice(-30)
+      : [];
     guild.rewardThreshold =
       Number.isInteger(guild.rewardThreshold) && guild.rewardThreshold > 0
         ? guild.rewardThreshold

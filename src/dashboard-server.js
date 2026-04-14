@@ -570,6 +570,9 @@ function renderDashboardHtml() {
             <label>Drop Duration
               <input name="dropDurationMinutes" id="duration-input" type="number" min="1" max="180" />
             </label>
+            <label>Drops Per Day
+              <input name="dropsPerDay" id="drops-per-day-input" type="number" min="1" max="10" />
+            </label>
             <label>Reminders
               <input name="reminderMinutesBeforeEnd" id="reminders-input" placeholder="10,5,1" />
             </label>
@@ -650,6 +653,7 @@ const el = {
   startHourInput: document.getElementById("start-hour-input"),
   endHourInput: document.getElementById("end-hour-input"),
   durationInput: document.getElementById("duration-input"),
+  dropsPerDayInput: document.getElementById("drops-per-day-input"),
   remindersInput: document.getElementById("reminders-input"),
   rewardThresholdInput: document.getElementById("reward-threshold-input"),
   enabledSelect: document.getElementById("enabled-select"),
@@ -824,6 +828,7 @@ function renderOverview() {
   el.startHourInput.value = data.config.dailyWindowStartHourLocal ?? "";
   el.endHourInput.value = data.config.dailyWindowEndHourLocal ?? "";
   el.durationInput.value = data.config.dropDurationMinutes ?? "";
+  el.dropsPerDayInput.value = data.config.dropsPerDay ?? "";
   el.remindersInput.value = (data.config.reminderMinutesBeforeEnd || []).join(",");
   el.rewardThresholdInput.value = data.config.rewardThreshold ?? "";
   el.enabledSelect.value = String(Boolean(data.config.enabled));
@@ -890,6 +895,7 @@ async function saveConfig() {
     dailyWindowStartHourLocal: el.startHourInput.value,
     dailyWindowEndHourLocal: el.endHourInput.value,
     dropDurationMinutes: el.durationInput.value,
+    dropsPerDay: el.dropsPerDayInput.value,
     reminderMinutesBeforeEnd: el.remindersInput.value,
     rewardThreshold: el.rewardThresholdInput.value,
     enabled: el.enabledSelect.value === "true",

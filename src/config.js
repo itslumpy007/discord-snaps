@@ -5,12 +5,13 @@ const DATA_DIR = path.join(ROOT_DIR, "data");
 const STATE_PATH = path.join(DATA_DIR, "state.json");
 
 const DEFAULTS = {
-  dropDurationMinutes: 15,
+  dropDurationMinutes: 2,
   schedulerIntervalMs: 30 * 1000,
   dailyWindowStartHourLocal: 18,
   dailyWindowEndHourLocal: 23,
   defaultTimeZone: "America/New_York",
-  reminderMinutesBeforeEnd: [10, 5, 1],
+  reminderMinutesBeforeEnd: [1],
+  dropsPerDay: 1,
   weeklyRecapWeekday: 1,
   weeklyRecapHourLocal: 9,
   rewardThreshold: 7,

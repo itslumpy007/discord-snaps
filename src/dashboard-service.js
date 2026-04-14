@@ -149,6 +149,13 @@ class DashboardService {
       );
     }
 
+    if (updates.dropsPerDay !== undefined) {
+      next.dropsPerDay = this.parseRange(updates.dropsPerDay, "Drops per day", 1, 10);
+      next.nextScheduledDropTs = null;
+      next.lastScheduledForDate = null;
+      next.scheduledDropHistory = [];
+    }
+
     if (updates.rewardThreshold !== undefined) {
       next.rewardThreshold = this.parseRange(updates.rewardThreshold, "Reward threshold", 1, 365);
     }

@@ -38,6 +38,16 @@ class SnapManager {
     }
 
     const todayKey = utcDateKeyFromUnix(unixNow());
+    const scheduledCount = Array.isArray(guild.scheduledDropHistory)
+      ? guild.scheduledDropHistory.filter((key) => key === todayKey).length
+      : 0;
+
+    if (scheduledCount >= guild.dropsPerDay) {
+      return this.store.updateGuild(guildId, {
+        nextScheduledDropTs: null,
+      });
+    }
+
     if (guild.lastScheduledForDate === todayKey && guild.nextScheduledDropTs) {
       return guild;
     }
@@ -52,6 +62,7 @@ class SnapManager {
     return this.store.updateGuild(guildId, {
       nextScheduledDropTs,
       lastScheduledForDate: utcDateKeyFromUnix(nextScheduledDropTs),
+      scheduledDropHistory: [...(guild.scheduledDropHistory || []), utcDateKeyFromUnix(nextScheduledDropTs)].slice(-30),
     });
   }
 
@@ -109,15 +120,15 @@ class SnapManager {
     const endTs = startTs + guildConfig.dropDurationMinutes * 60;
     const roleText = mentionRole(guildConfig.snapsRoleId);
 
-    const embed = buildBaseEmbed("Snap Drop 2.0")
+    const embed = buildBaseEmbed("Time to BeReal")
       .setDescription(
-        `${roleText} a new snap window is live.\n\nDrop one photo or video in the thread before <t:${endTs}:R>.`
+        `${roleText} it's time to post.\n\nDrop one real photo or video in the thread before <t:${endTs}:R>.`
       )
       .addFields(
-        { name: "Window", value: `${guildConfig.dropDurationMinutes} minute(s)`, inline: true },
+        { name: "BeReal Window", value: `${guildConfig.dropDurationMinutes} minute(s)`, inline: true },
         {
-          name: "Type",
-          value: options.isScheduled ? "Scheduled drop" : "Manual drop",
+          name: "Moment",
+          value: options.isScheduled ? "Random daily drop" : "Manual drop",
           inline: true,
         }
       );
@@ -223,8 +234,8 @@ class SnapManager {
 
     await thread.send({
       embeds: [
-        buildBaseEmbed("Snap Reminder")
-          .setDescription(`There ${minutes === 1 ? "is" : "are"} **${minutes} minute${minutes === 1 ? "" : "s"}** left to submit.`),
+        buildBaseEmbed("BeReal Reminder")
+          .setDescription(`There ${minutes === 1 ? "is" : "are"} **${minutes} minute${minutes === 1 ? "" : "s"}** left to post your BeReal.`),
       ],
     }).catch(() => {});
   }
@@ -270,8 +281,8 @@ class SnapManager {
     this.ensureScheduledDrop(guildId);
 
     if (thread && thread.isTextBased()) {
-      const embed = buildBaseEmbed("Drop Closed")
-        .setDescription("This snap window has ended.")
+      const embed = buildBaseEmbed("BeReal Window Closed")
+        .setDescription("Today's BeReal window has ended.")
         .addFields(
           { name: "Submitted", value: `${Object.keys(drop.submissions || {}).length}`, inline: true },
           { name: "Skipped", value: `${(drop.skipped || []).length}`, inline: true },
@@ -301,12 +312,12 @@ class SnapManager {
     }
 
     if (message.attachments.size === 0) {
-      await message.reply("Attach at least one photo or video for your snap.").catch(() => {});
+      await message.reply("Attach at least one photo or video for your BeReal.").catch(() => {});
       return true;
     }
 
     if (drop.submissions[message.author.id]) {
-      await message.reply("You already submitted for this drop.").catch(() => {});
+      await message.reply("You already posted for this BeReal moment.").catch(() => {});
       return true;
     }
 
@@ -356,8 +367,8 @@ class SnapManager {
     await message
       .reply(
         isLate
-          ? "Logged as a late snap."
-          : `Snap locked in with ${formatRelativeDuration(timeLeftMs)} left in the window.`
+          ? "Logged as a late BeReal."
+          : `BeReal locked in with ${formatRelativeDuration(timeLeftMs)} left in the window.`
       )
       .catch(() => {});
 
@@ -406,7 +417,7 @@ class SnapManager {
     if (thread) {
       await thread.setArchived(false).catch(() => {});
       await thread.setLocked(false).catch(() => {});
-      await thread.send({ embeds: [buildBaseEmbed("Drop Reopened").setDescription("This drop has been reopened by an admin.")] }).catch(() => {});
+      await thread.send({ embeds: [buildBaseEmbed("BeReal Reopened").setDescription("This BeReal moment has been reopened by an admin.")] }).catch(() => {});
     }
 
     const reopened = {
@@ -433,7 +444,7 @@ class SnapManager {
     await message.channel
       .send({
         embeds: [
-          buildBaseEmbed("Streak Milestone")
+          buildBaseEmbed("BeReal Streak")
             .setDescription(`<@${userId}> just hit a **${member.streak}-day** on-time streak.`),
         ],
       })
@@ -502,7 +513,7 @@ class SnapManager {
 
     await channel.send({
       embeds: [
-        buildBaseEmbed("Weekly Snap Recap").setDescription(
+        buildBaseEmbed("Weekly BeReal Recap").setDescription(
           members.length > 0
             ? members
                 .map(
