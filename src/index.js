@@ -43,6 +43,10 @@ async function main() {
 
   const manager = new SnapManager(client, store);
   const dashboardService = new DashboardService(client, store, manager);
+  const helpers = {
+    refreshGuildCommands: async (guildId) =>
+      registerCommands(runtimeConfig.token, runtimeConfig.clientId, [guildId]),
+  };
 
   client.once("ready", async () => {
     console.log(`Snap 2.0 online as ${client.user.tag}`);
@@ -112,10 +116,10 @@ async function main() {
   client.on("interactionCreate", async (interaction) => {
     try {
       const handled = interaction.isButton()
-        ? await handleComponent(interaction, manager, store)
+        ? await handleComponent(interaction, manager, store, helpers)
         : interaction.isModalSubmit()
-          ? await handleModal(interaction, manager, store)
-        : await handleCommand(interaction, manager, store);
+          ? await handleModal(interaction, manager, store, helpers)
+        : await handleCommand(interaction, manager, store, helpers);
       if (!handled) {
         return;
       }

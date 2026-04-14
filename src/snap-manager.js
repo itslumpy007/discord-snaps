@@ -541,6 +541,25 @@ class SnapManager {
     this.clearReminderTimers(guildId);
     this.store.resetGuild(guildId);
   }
+
+  resetGuildStats(guildId) {
+    this.store.resetGuildStats(guildId);
+  }
+
+  resetGuildSchedule(guildId) {
+    if (this.activeTimers.has(guildId)) {
+      clearTimeout(this.activeTimers.get(guildId));
+      this.activeTimers.delete(guildId);
+    }
+
+    this.clearReminderTimers(guildId);
+    this.store.resetGuildSchedule(guildId);
+    this.ensureScheduledDrop(guildId);
+  }
+
+  resetGuildRoles(guildId) {
+    this.store.resetGuildRoles(guildId);
+  }
 }
 
 module.exports = {

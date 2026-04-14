@@ -202,6 +202,36 @@ class StateStore {
 
     this.save();
   }
+
+  resetGuildStats(guildId) {
+    for (const key of Object.keys(this.state.members)) {
+      if (this.state.members[key]?.guildId === guildId) {
+        delete this.state.members[key];
+      }
+    }
+
+    const guild = this.getGuild(guildId);
+    guild.lastClosedDrop = null;
+    this.save();
+  }
+
+  resetGuildSchedule(guildId) {
+    const guild = this.getGuild(guildId);
+    guild.nextScheduledDropTs = null;
+    guild.lastScheduledForDate = null;
+    guild.scheduledDropHistory = [];
+    guild.lastClosedDrop = null;
+    delete this.state.currentDrops[guildId];
+    this.save();
+  }
+
+  resetGuildRoles(guildId) {
+    const guild = this.getGuild(guildId);
+    guild.snapsRoleId = null;
+    guild.rewardRoleId = null;
+    guild.joinRoleId = null;
+    this.save();
+  }
 }
 
 module.exports = {

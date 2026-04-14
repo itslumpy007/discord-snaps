@@ -1,0 +1,77 @@
+<svg width="1200" height="1280" viewBox="0 0 1200 1280" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="1280" fill="#1E1F22"/>
+  <rect x="0" y="0" width="88" height="1280" fill="#111214"/>
+  <circle cx="44" cy="46" r="24" fill="#5865F2"/>
+  <rect x="120" y="36" width="240" height="36" rx="18" fill="#5865F2"/>
+  <text x="156" y="59" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="18" font-weight="700">Ephemeral Admin View</text>
+
+  <rect x="120" y="100" width="960" height="1120" rx="28" fill="#313338"/>
+  <rect x="148" y="132" width="904" height="74" rx="18" fill="#2B2D31"/>
+  <text x="178" y="176" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="30" font-weight="700">/snappanel</text>
+
+  <rect x="148" y="230" width="904" height="58" rx="16" fill="#2B2D31"/>
+  <rect x="166" y="244" width="138" height="30" rx="15" fill="#5865F2"/>
+  <text x="198" y="264" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="16" font-weight="700">Overview</text>
+  <rect x="320" y="244" width="98" height="30" rx="15" fill="#4E5058"/>
+  <text x="352" y="264" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="16" font-weight="700">Live</text>
+  <rect x="434" y="244" width="124" height="30" rx="15" fill="#4E5058"/>
+  <text x="464" y="264" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="16" font-weight="700">Settings</text>
+  <rect x="574" y="244" width="106" height="30" rx="15" fill="#4E5058"/>
+  <text x="607" y="264" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="16" font-weight="700">Roles</text>
+  <rect x="696" y="244" width="126" height="30" rx="15" fill="#4E5058"/>
+  <text x="724" y="264" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="16" font-weight="700">Members</text>
+  <rect x="838" y="244" width="110" height="30" rx="15" fill="#4E5058"/>
+  <text x="868" y="264" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="16" font-weight="700">Danger</text>
+  <rect x="964" y="244" width="70" height="30" rx="15" fill="#4E5058"/>
+  <text x="981" y="264" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="16" font-weight="700">Refresh</text>
+
+  <rect x="148" y="314" width="904" height="628" rx="24" fill="#2B2D31"/>
+  <rect x="148" y="314" width="8" height="628" rx="4" fill="#F0B232"/>
+  <text x="180" y="364" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="30" font-weight="700">Snap Control Panel</text>
+  <text x="180" y="400" fill="#B5BAC1" font-family="Arial, sans-serif" font-size="20">Discord-only admin dashboard for your server's BeReal flow.</text>
+
+  <text x="180" y="466" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="18" font-weight="700">Automation</text>
+  <text x="420" y="466" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="18" font-weight="700">Timezone</text>
+  <text x="660" y="466" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="18" font-weight="700">Drops / Day</text>
+  <text x="180" y="494" fill="#DBDEE1" font-family="Arial, sans-serif" font-size="18">Enabled</text>
+  <text x="420" y="494" fill="#DBDEE1" font-family="Arial, sans-serif" font-size="18">America/New_York</text>
+  <text x="660" y="494" fill="#DBDEE1" font-family="Arial, sans-serif" font-size="18">3</text>
+
+  <text x="180" y="558" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="18" font-weight="700">Daily Window</text>
+  <text x="420" y="558" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="18" font-weight="700">Drop Duration</text>
+  <text x="660" y="558" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="18" font-weight="700">Reminders</text>
+  <text x="180" y="586" fill="#DBDEE1" font-family="Arial, sans-serif" font-size="18">9:00-23:59</text>
+  <text x="420" y="586" fill="#DBDEE1" font-family="Arial, sans-serif" font-size="18">2 minute(s)</text>
+  <text x="660" y="586" fill="#DBDEE1" font-family="Arial, sans-serif" font-size="18">10, 5, 1</text>
+
+  <text x="180" y="650" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="18" font-weight="700">Next Drop</text>
+  <text x="180" y="678" fill="#DBDEE1" font-family="Arial, sans-serif" font-size="18">Tuesday, April 14, 2026 7:45 PM</text>
+
+  <text x="180" y="742" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="18" font-weight="700">Active Drop</text>
+  <text x="180" y="770" fill="#DBDEE1" font-family="Arial, sans-serif" font-size="18">#daily-snap closes in 1 minute from now</text>
+
+  <text x="180" y="834" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="18" font-weight="700">Server Totals</text>
+  <text x="180" y="862" fill="#DBDEE1" font-family="Arial, sans-serif" font-size="18">Tracked: 42 | On-time: 318 | Late: 76 | Missed: 49</text>
+
+  <text x="180" y="910" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="18" font-weight="700">Top Streaks</text>
+  <text x="180" y="938" fill="#DBDEE1" font-family="Arial, sans-serif" font-size="17">1. Maya - best 18, on-time 51</text>
+  <text x="180" y="964" fill="#DBDEE1" font-family="Arial, sans-serif" font-size="17">2. Ellis - best 14, on-time 46</text>
+  <text x="180" y="990" fill="#DBDEE1" font-family="Arial, sans-serif" font-size="17">3. Jordan - best 11, on-time 39</text>
+
+  <rect x="148" y="970" width="904" height="214" rx="24" fill="#2B2D31"/>
+  <text x="180" y="1018" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="24" font-weight="700">Other Views</text>
+  <text x="180" y="1050" fill="#B5BAC1" font-family="Arial, sans-serif" font-size="18">The same panel swaps content when you tap the view buttons across the top.</text>
+
+  <rect x="180" y="1078" width="148" height="42" rx="12" fill="#4E5058"/>
+  <text x="214" y="1105" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="18" font-weight="700">Live Controls</text>
+  <rect x="346" y="1078" width="150" height="42" rx="12" fill="#4E5058"/>
+  <text x="378" y="1105" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="18" font-weight="700">Edit Schedule</text>
+  <rect x="514" y="1078" width="128" height="42" rx="12" fill="#4E5058"/>
+  <text x="551" y="1105" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="18" font-weight="700">Edit Roles</text>
+  <rect x="660" y="1078" width="144" height="42" rx="12" fill="#4E5058"/>
+  <text x="690" y="1105" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="18" font-weight="700">Inspect Member</text>
+  <rect x="822" y="1078" width="142" height="42" rx="12" fill="#DA373C"/>
+  <text x="858" y="1105" fill="#FFFFFF" font-family="Arial, sans-serif" font-size="18" font-weight="700">Scoped Reset</text>
+
+  <text x="180" y="1156" fill="#B5BAC1" font-family="Arial, sans-serif" font-size="17">Danger view also includes command sync, export, and reset scopes: stats, schedule, roles, or all.</text>
+</svg>

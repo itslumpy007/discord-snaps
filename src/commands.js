@@ -12,71 +12,358 @@ const {
 const { buildBaseEmbed } = require("./discord-utils");
 const { formatRelativeDuration, isValidTimeZone, unixNow } = require("./time");
 
-function buildPanelView(interactionOrGuildId, manager, store) {
-  const guildId =
-    typeof interactionOrGuildId === "string" ? interactionOrGuildId : interactionOrGuildId.guildId;
-  const guildConfig = store.getGuild(guildId);
-  const currentDrop = store.getCurrentDrop(guildId);
-  const members = store.listGuildMembers(guildId);
-  const stats = {
+const PANEL_VIEWS = {
+  overview: "overview",
+  live: "live",
+  settings: "settings",
+  roles: "roles",
+  members: "members",
+  danger: "danger",
+};
+
+function formatChannelMention(channelId) {
+  return channelId ? `<#${channelId}>` : "Not set";
+}
+
+function formatRoleMention(roleId) {
+  return roleId ? `<@&${roleId}>` : "Not set";
+}
+
+function getGuildStats(members) {
+  return {
     tracked: members.length,
     onTime: members.reduce((sum, member) => sum + (member.totalOnTime || 0), 0),
     late: members.reduce((sum, member) => sum + (member.totalLate || 0), 0),
     missed: members.reduce((sum, member) => sum + (member.totalMissed || 0), 0),
   };
+}
 
-  const embed = buildBaseEmbed("Snap Control Panel").addFields(
-    { name: "Automation", value: guildConfig.enabled ? "Enabled" : "Disabled", inline: true },
-    { name: "Timezone", value: guildConfig.timeZone, inline: true },
-    { name: "Drops / Day", value: `${guildConfig.dropsPerDay}`, inline: true },
-    {
-      name: "Daily Window",
-      value: `${guildConfig.dailyWindowStartHourLocal}:00-${guildConfig.dailyWindowEndHourLocal}:59`,
-      inline: true,
-    },
-    { name: "Drop Duration", value: `${guildConfig.dropDurationMinutes} minute(s)`, inline: true },
-    {
-      name: "Reminders",
-      value: guildConfig.reminderMinutesBeforeEnd.join(", ") || "None",
-      inline: true,
-    },
-    {
-      name: "Next Drop",
-      value: guildConfig.nextScheduledDropTs ? `<t:${guildConfig.nextScheduledDropTs}:F>` : "Not scheduled",
-      inline: false,
-    },
-    {
-      name: "Active Drop",
-      value: currentDrop?.active
-        ? `<#${currentDrop.threadId}> closes ${formatRelativeDuration(currentDrop.endTs * 1000 - Date.now())} from now`
-        : "No active drop",
-      inline: false,
-    },
-    {
-      name: "Server Totals",
-      value: `Tracked: **${stats.tracked}** | On-time: **${stats.onTime}** | Late: **${stats.late}** | Missed: **${stats.missed}**`,
-      inline: false,
-    }
-  );
+function formatLeaderboard(members, sorter, formatter) {
+  const rows = [...members].sort(sorter).slice(0, 5).map(formatter);
+  return rows.length ? rows.join("\n") : "No member history yet.";
+}
 
-  const rowOne = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("panel:refresh").setLabel("Refresh").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("panel:start").setLabel("Start").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("panel:close").setLabel("Close").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("panel:extend").setLabel("Extend +5m").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("panel:reopen").setLabel("Reopen").setStyle(ButtonStyle.Secondary)
-  );
-  const rowTwo = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("panel:reroll").setLabel("Reroll").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("panel:schedule").setLabel("Schedule").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("panel:recap").setLabel("Recap").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("panel:export").setLabel("Export").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("panel:reset").setLabel("Reset").setStyle(ButtonStyle.Danger)
-  );
+function buildNavRows(activeView) {
+  const button = (view, label) =>
+    new ButtonBuilder()
+      .setCustomId(`panel:view:${view}`)
+      .setLabel(label)
+      .setStyle(view === activeView ? ButtonStyle.Primary : ButtonStyle.Secondary);
+
+  return [
+    new ActionRowBuilder().addComponents(
+      button(PANEL_VIEWS.overview, "Overview"),
+      button(PANEL_VIEWS.live, "Live"),
+      button(PANEL_VIEWS.settings, "Settings"),
+      button(PANEL_VIEWS.roles, "Roles"),
+      button(PANEL_VIEWS.members, "Members")
+    ),
+    new ActionRowBuilder().addComponents(
+      button(PANEL_VIEWS.danger, "Danger"),
+      new ButtonBuilder()
+        .setCustomId(`panel:refresh:${activeView}`)
+        .setLabel("Refresh")
+        .setStyle(ButtonStyle.Secondary)
+    ),
+  ];
+}
+
+function buildOverviewPanel(guildConfig, currentDrop, members, stats) {
+  return buildBaseEmbed("Snap Control Panel")
+    .setDescription("Discord-only admin dashboard for your server's BeReal flow.")
+    .addFields(
+      { name: "Automation", value: guildConfig.enabled ? "Enabled" : "Paused", inline: true },
+      { name: "Timezone", value: guildConfig.timeZone, inline: true },
+      { name: "Drops / Day", value: `${guildConfig.dropsPerDay}`, inline: true },
+      {
+        name: "Daily Window",
+        value: `${guildConfig.dailyWindowStartHourLocal}:00-${guildConfig.dailyWindowEndHourLocal}:59`,
+        inline: true,
+      },
+      { name: "Drop Duration", value: `${guildConfig.dropDurationMinutes} minute(s)`, inline: true },
+      {
+        name: "Reminders",
+        value: guildConfig.reminderMinutesBeforeEnd.join(", ") || "None",
+        inline: true,
+      },
+      {
+        name: "Next Drop",
+        value: guildConfig.nextScheduledDropTs ? `<t:${guildConfig.nextScheduledDropTs}:F>` : "Not scheduled",
+        inline: false,
+      },
+      {
+        name: "Active Drop",
+        value: currentDrop?.active
+          ? `<#${currentDrop.threadId}> closes ${formatRelativeDuration(
+              currentDrop.endTs * 1000 - Date.now()
+            )} from now`
+          : "No active drop",
+        inline: false,
+      },
+      {
+        name: "Server Totals",
+        value: `Tracked: **${stats.tracked}** | On-time: **${stats.onTime}** | Late: **${stats.late}** | Missed: **${stats.missed}**`,
+        inline: false,
+      },
+      {
+        name: "Top Streaks",
+        value: formatLeaderboard(
+          members,
+          (a, b) => (b.bestStreak || 0) - (a.bestStreak || 0) || (b.totalOnTime || 0) - (a.totalOnTime || 0),
+          (member, index) =>
+            `**${index + 1}.** ${member.displayName} - best ${member.bestStreak || 0}, on-time ${member.totalOnTime || 0}`
+        ),
+        inline: false,
+      }
+    );
+}
+
+function buildLivePanel(guildConfig, currentDrop) {
+  const submitted = Object.keys(currentDrop?.submissions || {}).length;
+  const snoozed = (currentDrop?.snoozed || []).length;
+  const skipped = (currentDrop?.skipped || []).length;
+
+  return buildBaseEmbed("Snap Control Panel: Live")
+    .setDescription("Real-time controls for the current drop and the next scheduled moment.")
+    .addFields(
+      {
+        name: "Status",
+        value: currentDrop?.active ? "Live now" : "Idle",
+        inline: true,
+      },
+      {
+        name: "Thread",
+        value: currentDrop?.threadId ? `<#${currentDrop.threadId}>` : "No active thread",
+        inline: true,
+      },
+      {
+        name: "Closes",
+        value: currentDrop?.active ? `<t:${currentDrop.endTs}:R>` : "No deadline",
+        inline: true,
+      },
+      {
+        name: "Participation",
+        value: `Submitted: **${submitted}** | Snoozed: **${snoozed}** | Missed: **${skipped}**`,
+        inline: false,
+      },
+      {
+        name: "Next Auto Drop",
+        value: guildConfig.nextScheduledDropTs ? `<t:${guildConfig.nextScheduledDropTs}:F>` : "Not scheduled",
+        inline: false,
+      },
+      {
+        name: "Manual Controls",
+        value: "Start, close, extend, reopen, reroll, export, and recap are all available below.",
+        inline: false,
+      }
+    );
+}
+
+function buildSettingsPanel(guildConfig) {
+  return buildBaseEmbed("Snap Control Panel: Settings")
+    .setDescription("Scheduling, reminders, and automation switches for this server.")
+    .addFields(
+      { name: "Automation", value: guildConfig.enabled ? "Enabled" : "Paused", inline: true },
+      {
+        name: "Weekly Recap",
+        value: guildConfig.weeklyRecapEnabled ? "Enabled" : "Disabled",
+        inline: true,
+      },
+      { name: "Timezone", value: guildConfig.timeZone, inline: true },
+      {
+        name: "Daily Window",
+        value: `${guildConfig.dailyWindowStartHourLocal}:00-${guildConfig.dailyWindowEndHourLocal}:59`,
+        inline: true,
+      },
+      { name: "Drop Duration", value: `${guildConfig.dropDurationMinutes} minute(s)`, inline: true },
+      {
+        name: "Reminders",
+        value: guildConfig.reminderMinutesBeforeEnd.join(", ") || "None",
+        inline: true,
+      },
+      {
+        name: "Drops / Day",
+        value: `${guildConfig.dropsPerDay}`,
+        inline: true,
+      },
+      {
+        name: "Next Drop",
+        value: guildConfig.nextScheduledDropTs ? `<t:${guildConfig.nextScheduledDropTs}:F>` : "Not scheduled",
+        inline: true,
+      }
+    );
+}
+
+function buildRolesPanel(guildConfig) {
+  return buildBaseEmbed("Snap Control Panel: Roles")
+    .setDescription("Channel and role assignments used by the bot.")
+    .addFields(
+      { name: "Snap Channel", value: formatChannelMention(guildConfig.snapsChannelId), inline: false },
+      { name: "Ping Role", value: formatRoleMention(guildConfig.snapsRoleId), inline: false },
+      {
+        name: "Reward Role",
+        value: guildConfig.rewardRoleId
+          ? `<@&${guildConfig.rewardRoleId}> at ${guildConfig.rewardThreshold}+ streak`
+          : "Not configured",
+        inline: false,
+      },
+      { name: "Join Role", value: formatRoleMention(guildConfig.joinRoleId), inline: false }
+    );
+}
+
+function buildMembersPanel(members, currentDrop) {
+  const submittedIds = new Set(Object.keys(currentDrop?.submissions || {}));
+  const participation = currentDrop?.active
+    ? `Submitted now: **${submittedIds.size}** | Snoozed: **${(currentDrop.snoozed || []).length}** | Waiting: **${Math.max(
+        0,
+        members.length - submittedIds.size - (currentDrop.snoozed || []).length
+      )}**`
+    : "No active drop right now.";
+
+  return buildBaseEmbed("Snap Control Panel: Members")
+    .setDescription("People-focused tools, plus quick reads on who is thriving or falling behind.")
+    .addFields(
+      {
+        name: "Current Participation",
+        value: participation,
+        inline: false,
+      },
+      {
+        name: "Top On-Time",
+        value: formatLeaderboard(
+          members,
+          (a, b) => (b.totalOnTime || 0) - (a.totalOnTime || 0) || (b.bestStreak || 0) - (a.bestStreak || 0),
+          (member, index) =>
+            `**${index + 1}.** ${member.displayName} - on-time ${member.totalOnTime || 0}, streak ${member.streak || 0}`
+        ),
+        inline: false,
+      },
+      {
+        name: "Most Missed",
+        value: formatLeaderboard(
+          members,
+          (a, b) => (b.totalMissed || 0) - (a.totalMissed || 0) || (b.totalLate || 0) - (a.totalLate || 0),
+          (member, index) =>
+            `**${index + 1}.** ${member.displayName} - missed ${member.totalMissed || 0}, late ${member.totalLate || 0}`
+        ),
+        inline: false,
+      }
+    );
+}
+
+function buildDangerPanel(guildConfig) {
+  return buildBaseEmbed("Snap Control Panel: Danger")
+    .setDescription("Higher-impact maintenance actions. Use these carefully.")
+    .addFields(
+      {
+        name: "Reset Options",
+        value: "You can reset just stats, just schedule data, just role config, or the entire server state.",
+        inline: false,
+      },
+      {
+        name: "Command Sync",
+        value: "Force a guild slash-command refresh if Discord is still showing stale commands.",
+        inline: false,
+      },
+      {
+        name: "Current Safeguards",
+        value: `Automation is ${guildConfig.enabled ? "enabled" : "paused"} and resets require typing \`RESET\` in a modal.`,
+        inline: false,
+      }
+    );
+}
+
+function buildPanelActions(view) {
+  if (view === PANEL_VIEWS.live) {
+    return [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`panel:start:${view}`).setLabel("Start").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`panel:close:${view}`).setLabel("Close").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`panel:extend:${view}`).setLabel("Extend +5m").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`panel:reopen:${view}`).setLabel("Reopen").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`panel:reroll:${view}`).setLabel("Reroll").setStyle(ButtonStyle.Secondary)
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`panel:recap:${view}`).setLabel("Recap").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`panel:export:${view}`).setLabel("Export").setStyle(ButtonStyle.Secondary)
+      ),
+    ];
+  }
+
+  if (view === PANEL_VIEWS.settings) {
+    return [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`panel:schedule:${view}`).setLabel("Edit Schedule").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`panel:toggle-automation:${view}`)
+          .setLabel("Toggle Automation")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`panel:toggle-recap:${view}`)
+          .setLabel("Toggle Recap")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`panel:reroll:${view}`).setLabel("Reroll").setStyle(ButtonStyle.Secondary)
+      ),
+    ];
+  }
+
+  if (view === PANEL_VIEWS.roles) {
+    return [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`panel:roles:${view}`).setLabel("Edit Roles").setStyle(ButtonStyle.Primary)
+      ),
+    ];
+  }
+
+  if (view === PANEL_VIEWS.members) {
+    return [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`panel:inspect-member:${view}`).setLabel("Inspect Member").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`panel:assign-join-role:${view}`)
+          .setLabel("Give Join Role")
+          .setStyle(ButtonStyle.Secondary)
+      ),
+    ];
+  }
+
+  if (view === PANEL_VIEWS.danger) {
+    return [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`panel:sync-commands:${view}`)
+          .setLabel("Sync Commands")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`panel:export:${view}`).setLabel("Export").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`panel:reset:${view}`).setLabel("Reset").setStyle(ButtonStyle.Danger)
+      ),
+    ];
+  }
+
+  return [];
+}
+
+function buildPanelView(interactionOrGuildId, manager, store, options = {}) {
+  const guildId =
+    typeof interactionOrGuildId === "string" ? interactionOrGuildId : interactionOrGuildId.guildId;
+  const view = options.view || PANEL_VIEWS.overview;
+  const guildConfig = store.getGuild(guildId);
+  const currentDrop = store.getCurrentDrop(guildId);
+  const members = store.listGuildMembers(guildId);
+  const stats = getGuildStats(members);
+  const embedByView = {
+    [PANEL_VIEWS.overview]: buildOverviewPanel(guildConfig, currentDrop, members, stats),
+    [PANEL_VIEWS.live]: buildLivePanel(guildConfig, currentDrop),
+    [PANEL_VIEWS.settings]: buildSettingsPanel(guildConfig),
+    [PANEL_VIEWS.roles]: buildRolesPanel(guildConfig),
+    [PANEL_VIEWS.members]: buildMembersPanel(members, currentDrop),
+    [PANEL_VIEWS.danger]: buildDangerPanel(guildConfig),
+  };
+  const components = [...buildNavRows(view), ...buildPanelActions(view)];
 
   return {
-    embeds: [embed],
-    components: [rowOne, rowTwo],
+    embeds: [embedByView[view] || embedByView[PANEL_VIEWS.overview]],
+    components,
   };
 }
 
@@ -230,7 +517,157 @@ function buildCommands() {
   ].map((command) => command.toJSON());
 }
 
-async function handleCommand(interaction, manager, store) {
+function createScheduleModal(guildConfig, view) {
+  const modal = new ModalBuilder()
+    .setCustomId(`panel:schedule-modal:${view}`)
+    .setTitle("Update Schedule");
+  const startInput = new TextInputBuilder()
+    .setCustomId("start_hour")
+    .setLabel("Start Hour")
+    .setStyle(TextInputStyle.Short)
+    .setValue(String(guildConfig.dailyWindowStartHourLocal))
+    .setRequired(true);
+  const endInput = new TextInputBuilder()
+    .setCustomId("end_hour")
+    .setLabel("End Hour")
+    .setStyle(TextInputStyle.Short)
+    .setValue(String(guildConfig.dailyWindowEndHourLocal))
+    .setRequired(true);
+  const durationInput = new TextInputBuilder()
+    .setCustomId("duration_minutes")
+    .setLabel("Duration Minutes")
+    .setStyle(TextInputStyle.Short)
+    .setValue(String(guildConfig.dropDurationMinutes))
+    .setRequired(true);
+  const dropsInput = new TextInputBuilder()
+    .setCustomId("drops_per_day")
+    .setLabel("Drops Per Day")
+    .setStyle(TextInputStyle.Short)
+    .setValue(String(guildConfig.dropsPerDay))
+    .setRequired(true);
+  const remindersInput = new TextInputBuilder()
+    .setCustomId("reminders")
+    .setLabel("Reminders")
+    .setStyle(TextInputStyle.Short)
+    .setValue(guildConfig.reminderMinutesBeforeEnd.join(","))
+    .setRequired(true);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(startInput),
+    new ActionRowBuilder().addComponents(endInput),
+    new ActionRowBuilder().addComponents(durationInput),
+    new ActionRowBuilder().addComponents(dropsInput),
+    new ActionRowBuilder().addComponents(remindersInput)
+  );
+  return modal;
+}
+
+function createRolesModal(guildConfig, view) {
+  const modal = new ModalBuilder().setCustomId(`panel:roles-modal:${view}`).setTitle("Edit Channel and Roles");
+  const channelInput = new TextInputBuilder()
+    .setCustomId("channel_id")
+    .setLabel("Snap Channel ID")
+    .setStyle(TextInputStyle.Short)
+    .setValue(guildConfig.snapsChannelId || "")
+    .setRequired(false);
+  const pingRoleInput = new TextInputBuilder()
+    .setCustomId("snaps_role_id")
+    .setLabel("Ping Role ID")
+    .setStyle(TextInputStyle.Short)
+    .setValue(guildConfig.snapsRoleId || "")
+    .setRequired(false);
+  const rewardRoleInput = new TextInputBuilder()
+    .setCustomId("reward_role_id")
+    .setLabel("Reward Role ID")
+    .setStyle(TextInputStyle.Short)
+    .setValue(guildConfig.rewardRoleId || "")
+    .setRequired(false);
+  const rewardThresholdInput = new TextInputBuilder()
+    .setCustomId("reward_threshold")
+    .setLabel("Reward Threshold")
+    .setStyle(TextInputStyle.Short)
+    .setValue(String(guildConfig.rewardThreshold || 1))
+    .setRequired(true);
+  const joinRoleInput = new TextInputBuilder()
+    .setCustomId("join_role_id")
+    .setLabel("Join Role ID")
+    .setStyle(TextInputStyle.Short)
+    .setValue(guildConfig.joinRoleId || "")
+    .setRequired(false);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(channelInput),
+    new ActionRowBuilder().addComponents(pingRoleInput),
+    new ActionRowBuilder().addComponents(rewardRoleInput),
+    new ActionRowBuilder().addComponents(rewardThresholdInput),
+    new ActionRowBuilder().addComponents(joinRoleInput)
+  );
+  return modal;
+}
+
+function createMemberInspectModal(view) {
+  return new ModalBuilder()
+    .setCustomId(`panel:inspect-member-modal:${view}`)
+    .setTitle("Inspect Member")
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("user_id")
+          .setLabel("Discord User ID")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      )
+    );
+}
+
+function createAssignJoinRoleModal(view) {
+  return new ModalBuilder()
+    .setCustomId(`panel:assign-join-role-modal:${view}`)
+    .setTitle("Give Join Role")
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("user_id")
+          .setLabel("Discord User ID")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      )
+    );
+}
+
+function createResetModal(view) {
+  const modal = new ModalBuilder().setCustomId(`panel:reset-modal:${view}`).setTitle("Reset Server State");
+  const scopeInput = new TextInputBuilder()
+    .setCustomId("scope")
+    .setLabel("Scope: stats, schedule, roles, or all")
+    .setStyle(TextInputStyle.Short)
+    .setValue("all")
+    .setRequired(true);
+  const confirmInput = new TextInputBuilder()
+    .setCustomId("confirm")
+    .setLabel("Type RESET to confirm")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(scopeInput),
+    new ActionRowBuilder().addComponents(confirmInput)
+  );
+  return modal;
+}
+
+function buildMemberStatsEmbed(entry) {
+  return buildBaseEmbed(`BeReal Stats: ${entry.displayName}`).addFields(
+    { name: "On-Time", value: `${entry.totalOnTime}`, inline: true },
+    { name: "Late", value: `${entry.totalLate}`, inline: true },
+    { name: "Missed", value: `${entry.totalMissed || 0}`, inline: true },
+    { name: "Current Streak", value: `${entry.streak}`, inline: true },
+    { name: "Best Streak", value: `${entry.bestStreak || 0}`, inline: true },
+    { name: "Last On-Time", value: entry.lastOnTimeDate || "Never", inline: true }
+  );
+}
+
+async function handleCommand(interaction, manager, store, helpers = {}) {
   if (!interaction.isChatInputCommand() || !interaction.guildId) {
     return false;
   }
@@ -543,7 +980,7 @@ async function handleCommand(interaction, manager, store) {
 
   if (interaction.commandName === "snappanel") {
     await interaction.reply({
-      ...buildPanelView(interaction, manager, store),
+      ...buildPanelView(interaction, manager, store, { view: PANEL_VIEWS.overview }),
       ephemeral: true,
     });
     return true;
@@ -556,16 +993,7 @@ async function handleCommand(interaction, manager, store) {
       (await interaction.guild.members.fetch(user.id).catch(() => null));
     const entry = store.getMember(interaction.guildId, user.id, member?.displayName || user.username);
 
-    const embed = buildBaseEmbed(`BeReal Stats: ${entry.displayName}`).addFields(
-      { name: "On-Time", value: `${entry.totalOnTime}`, inline: true },
-      { name: "Late", value: `${entry.totalLate}`, inline: true },
-      { name: "Missed", value: `${entry.totalMissed || 0}`, inline: true },
-      { name: "Current Streak", value: `${entry.streak}`, inline: true },
-      { name: "Best Streak", value: `${entry.bestStreak || 0}`, inline: true },
-      { name: "Last On-Time", value: entry.lastOnTimeDate || "Never", inline: true }
-    );
-
-    await interaction.reply({ embeds: [embed] });
+    await interaction.reply({ embeds: [buildMemberStatsEmbed(entry)] });
     return true;
   }
 
@@ -695,7 +1123,7 @@ async function handleCommand(interaction, manager, store) {
   return false;
 }
 
-async function handleComponent(interaction, manager, store) {
+async function handleComponent(interaction, manager, store, helpers = {}) {
   if (!interaction.isButton() || !interaction.guildId) {
     return false;
   }
@@ -717,11 +1145,7 @@ async function handleComponent(interaction, manager, store) {
       interaction.member?.displayName || interaction.user.username
     );
     await interaction.reply({
-      embeds: [
-        buildBaseEmbed(`BeReal Stats: ${entry.displayName}`).setDescription(
-          `On-time: **${entry.totalOnTime}**\nLate: **${entry.totalLate}**\nMissed: **${entry.totalMissed || 0}**\nCurrent streak: **${entry.streak}**\nBest streak: **${entry.bestStreak || 0}**`
-        ),
-      ],
+      embeds: [buildMemberStatsEmbed(entry)],
       ephemeral: true,
     });
     return true;
@@ -737,18 +1161,30 @@ async function handleComponent(interaction, manager, store) {
     return true;
   }
 
-  if (interaction.customId === "panel:refresh") {
-    await interaction.update(buildPanelView(interaction, manager, store));
+  if (!interaction.customId.startsWith("panel:")) {
+    return false;
+  }
+
+  const [, action, view = PANEL_VIEWS.overview] = interaction.customId.split(":");
+
+  if (action === "view") {
+    const nextView = view;
+    await interaction.update(buildPanelView(interaction, manager, store, { view: nextView }));
     return true;
   }
 
-  if (interaction.customId === "panel:start") {
+  if (action === "refresh") {
+    await interaction.update(buildPanelView(interaction, manager, store, { view }));
+    return true;
+  }
+
+  if (action === "start") {
     try {
       await manager.startDrop(interaction.guildId, {
         forcedByUserId: interaction.user.id,
         isScheduled: false,
       });
-      await interaction.update(buildPanelView(interaction, manager, store));
+      await interaction.update(buildPanelView(interaction, manager, store, { view }));
       await interaction.followUp({ content: "Manual drop started.", ephemeral: true });
     } catch (error) {
       await interaction.reply({ content: error.message, ephemeral: true });
@@ -756,7 +1192,7 @@ async function handleComponent(interaction, manager, store) {
     return true;
   }
 
-  if (interaction.customId === "panel:close") {
+  if (action === "close") {
     try {
       const currentDrop = store.getCurrentDrop(interaction.guildId);
       if (!currentDrop?.active) {
@@ -766,7 +1202,7 @@ async function handleComponent(interaction, manager, store) {
       currentDrop.endTs = unixNow();
       store.setCurrentDrop(interaction.guildId, currentDrop);
       await manager.finalizeDrop(interaction.guildId);
-      await interaction.update(buildPanelView(interaction, manager, store));
+      await interaction.update(buildPanelView(interaction, manager, store, { view }));
       await interaction.followUp({ content: "Active drop closed.", ephemeral: true });
     } catch (error) {
       await interaction.reply({ content: error.message, ephemeral: true });
@@ -774,10 +1210,10 @@ async function handleComponent(interaction, manager, store) {
     return true;
   }
 
-  if (interaction.customId === "panel:extend") {
+  if (action === "extend") {
     try {
       await manager.extendDrop(interaction.guildId, 5);
-      await interaction.update(buildPanelView(interaction, manager, store));
+      await interaction.update(buildPanelView(interaction, manager, store, { view }));
       await interaction.followUp({ content: "Extended the active drop by 5 minutes.", ephemeral: true });
     } catch (error) {
       await interaction.reply({ content: error.message, ephemeral: true });
@@ -785,10 +1221,10 @@ async function handleComponent(interaction, manager, store) {
     return true;
   }
 
-  if (interaction.customId === "panel:reopen") {
+  if (action === "reopen") {
     try {
       await manager.reopenLastClosedDrop(interaction.guildId);
-      await interaction.update(buildPanelView(interaction, manager, store));
+      await interaction.update(buildPanelView(interaction, manager, store, { view }));
       await interaction.followUp({ content: "Reopened the last drop.", ephemeral: true });
     } catch (error) {
       await interaction.reply({ content: error.message, ephemeral: true });
@@ -796,26 +1232,26 @@ async function handleComponent(interaction, manager, store) {
     return true;
   }
 
-  if (interaction.customId === "panel:reroll") {
+  if (action === "reroll") {
     store.updateGuild(interaction.guildId, {
       nextScheduledDropTs: null,
       lastScheduledForDate: null,
       scheduledDropHistory: [],
     });
     manager.ensureScheduledDrop(interaction.guildId);
-    await interaction.update(buildPanelView(interaction, manager, store));
+    await interaction.update(buildPanelView(interaction, manager, store, { view }));
     await interaction.followUp({ content: "Rerolled the next scheduled drop.", ephemeral: true });
     return true;
   }
 
-  if (interaction.customId === "panel:recap") {
+  if (action === "recap") {
     const sent = await manager.maybeSendWeeklyRecap(interaction.guildId, true);
-    await interaction.update(buildPanelView(interaction, manager, store));
+    await interaction.update(buildPanelView(interaction, manager, store, { view }));
     await interaction.followUp({ content: sent ? "Weekly recap posted." : "Weekly recap could not be posted.", ephemeral: true });
     return true;
   }
 
-  if (interaction.customId === "panel:export") {
+  if (action === "export") {
     const payload = {
       exportedAt: new Date().toISOString(),
       guildId: interaction.guildId,
@@ -829,67 +1265,75 @@ async function handleComponent(interaction, manager, store) {
     return true;
   }
 
-  if (interaction.customId === "panel:schedule") {
+  if (action === "schedule") {
     const guildConfig = store.getGuild(interaction.guildId);
-    const modal = new ModalBuilder()
-      .setCustomId("panel:schedule-modal")
-      .setTitle("Update Schedule");
-    const startInput = new TextInputBuilder()
-      .setCustomId("start_hour")
-      .setLabel("Start Hour")
-      .setStyle(TextInputStyle.Short)
-      .setValue(String(guildConfig.dailyWindowStartHourLocal))
-      .setRequired(true);
-    const endInput = new TextInputBuilder()
-      .setCustomId("end_hour")
-      .setLabel("End Hour")
-      .setStyle(TextInputStyle.Short)
-      .setValue(String(guildConfig.dailyWindowEndHourLocal))
-      .setRequired(true);
-    const durationInput = new TextInputBuilder()
-      .setCustomId("duration_minutes")
-      .setLabel("Duration Minutes")
-      .setStyle(TextInputStyle.Short)
-      .setValue(String(guildConfig.dropDurationMinutes))
-      .setRequired(true);
-    const dropsInput = new TextInputBuilder()
-      .setCustomId("drops_per_day")
-      .setLabel("Drops Per Day")
-      .setStyle(TextInputStyle.Short)
-      .setValue(String(guildConfig.dropsPerDay))
-      .setRequired(true);
-    const remindersInput = new TextInputBuilder()
-      .setCustomId("reminders")
-      .setLabel("Reminders")
-      .setStyle(TextInputStyle.Short)
-      .setValue(guildConfig.reminderMinutesBeforeEnd.join(","))
-      .setRequired(true);
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(startInput),
-      new ActionRowBuilder().addComponents(endInput),
-      new ActionRowBuilder().addComponents(durationInput),
-      new ActionRowBuilder().addComponents(dropsInput),
-      new ActionRowBuilder().addComponents(remindersInput)
-    );
-    await interaction.showModal(modal);
+    await interaction.showModal(createScheduleModal(guildConfig, view));
     return true;
   }
 
-  if (interaction.customId === "panel:reset") {
-    const modal = new ModalBuilder()
-      .setCustomId("panel:reset-modal")
-      .setTitle("Reset Server State")
-      .addComponents(
-        new ActionRowBuilder().addComponents(
-          new TextInputBuilder()
-            .setCustomId("confirm")
-            .setLabel("Type RESET to confirm")
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-        )
-      );
-    await interaction.showModal(modal);
+  if (action === "roles") {
+    await interaction.showModal(createRolesModal(store.getGuild(interaction.guildId), view));
+    return true;
+  }
+
+  if (action === "inspect-member") {
+    await interaction.showModal(createMemberInspectModal(view));
+    return true;
+  }
+
+  if (action === "assign-join-role") {
+    await interaction.showModal(createAssignJoinRoleModal(view));
+    return true;
+  }
+
+  if (action === "toggle-automation") {
+    const guildConfig = store.getGuild(interaction.guildId);
+    const enabled = !guildConfig.enabled;
+    store.updateGuild(interaction.guildId, {
+      enabled,
+      nextScheduledDropTs: enabled ? null : guildConfig.nextScheduledDropTs,
+    });
+    if (enabled) {
+      manager.ensureScheduledDrop(interaction.guildId);
+    }
+    await interaction.update(buildPanelView(interaction, manager, store, { view }));
+    await interaction.followUp({
+      content: `Automatic drops are now ${enabled ? "enabled" : "paused"}.`,
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  if (action === "toggle-recap") {
+    const guildConfig = store.getGuild(interaction.guildId);
+    store.updateGuild(interaction.guildId, {
+      weeklyRecapEnabled: !guildConfig.weeklyRecapEnabled,
+    });
+    await interaction.update(buildPanelView(interaction, manager, store, { view }));
+    await interaction.followUp({
+      content: `Weekly recap is now ${guildConfig.weeklyRecapEnabled ? "disabled" : "enabled"}.`,
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  if (action === "sync-commands") {
+    if (!helpers.refreshGuildCommands) {
+      await interaction.reply({ content: "Command sync helper is not available in this runtime.", ephemeral: true });
+      return true;
+    }
+
+    await helpers.refreshGuildCommands(interaction.guildId);
+    await interaction.update(buildPanelView(interaction, manager, store, { view }));
+    await interaction.followUp({
+      content: "Guild slash commands synced. Discord may take a moment to refresh the command list.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  if (action === "reset") {
+    await interaction.showModal(createResetModal(view));
     return true;
   }
 
@@ -901,7 +1345,9 @@ async function handleModal(interaction, manager, store) {
     return false;
   }
 
-  if (interaction.customId === "panel:schedule-modal") {
+  const [, action, view = PANEL_VIEWS.overview] = interaction.customId.split(":");
+
+  if (action === "schedule-modal") {
     const startHour = Number.parseInt(interaction.fields.getTextInputValue("start_hour"), 10);
     const endHour = Number.parseInt(interaction.fields.getTextInputValue("end_hour"), 10);
     const duration = Number.parseInt(interaction.fields.getTextInputValue("duration_minutes"), 10);
@@ -936,25 +1382,133 @@ async function handleModal(interaction, manager, store) {
     });
     manager.ensureScheduledDrop(interaction.guildId);
     await interaction.reply({
-      ...buildPanelView(interaction, manager, store),
+      ...buildPanelView(interaction, manager, store, { view }),
       ephemeral: true,
     });
     return true;
   }
 
-  if (interaction.customId === "panel:reset-modal") {
+  if (action === "roles-modal") {
+    const channelId = interaction.fields.getTextInputValue("channel_id").trim() || null;
+    const snapsRoleId = interaction.fields.getTextInputValue("snaps_role_id").trim() || null;
+    const rewardRoleId = interaction.fields.getTextInputValue("reward_role_id").trim() || null;
+    const joinRoleId = interaction.fields.getTextInputValue("join_role_id").trim() || null;
+    const rewardThreshold = Number.parseInt(interaction.fields.getTextInputValue("reward_threshold"), 10);
+
+    if (!Number.isInteger(rewardThreshold) || rewardThreshold < 1 || rewardThreshold > 365) {
+      await interaction.reply({ content: "Reward threshold must be between 1 and 365.", ephemeral: true });
+      return true;
+    }
+
+    if (channelId) {
+      const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);
+      if (!channel || !channel.isTextBased()) {
+        await interaction.reply({ content: "That channel ID is invalid or not text-based.", ephemeral: true });
+        return true;
+      }
+    }
+
+    for (const [roleId, label] of [
+      [snapsRoleId, "ping role"],
+      [rewardRoleId, "reward role"],
+      [joinRoleId, "join role"],
+    ]) {
+      if (!roleId) {
+        continue;
+      }
+      const role = await interaction.guild.roles.fetch(roleId).catch(() => null);
+      if (!role) {
+        await interaction.reply({ content: `The ${label} ID is invalid for this server.`, ephemeral: true });
+        return true;
+      }
+    }
+
+    store.updateGuild(interaction.guildId, {
+      snapsChannelId: channelId,
+      snapsRoleId,
+      rewardRoleId,
+      rewardThreshold,
+      joinRoleId,
+      nextScheduledDropTs: null,
+      lastScheduledForDate: null,
+      scheduledDropHistory: [],
+    });
+    manager.ensureScheduledDrop(interaction.guildId);
+    await interaction.reply({
+      ...buildPanelView(interaction, manager, store, { view }),
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  if (action === "inspect-member-modal") {
+    const userId = interaction.fields.getTextInputValue("user_id").trim();
+    const member = await interaction.guild.members.fetch(userId).catch(() => null);
+    if (!member) {
+      await interaction.reply({ content: "I couldn't find that member in this server.", ephemeral: true });
+      return true;
+    }
+
+    const entry = store.getMember(interaction.guildId, userId, member.displayName);
+    await interaction.reply({
+      embeds: [buildMemberStatsEmbed(entry)],
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  if (action === "assign-join-role-modal") {
+    const userId = interaction.fields.getTextInputValue("user_id").trim();
+    const guildConfig = store.getGuild(interaction.guildId);
+    if (!guildConfig.joinRoleId) {
+      await interaction.reply({ content: "No join role is configured yet.", ephemeral: true });
+      return true;
+    }
+
+    const member = await interaction.guild.members.fetch(userId).catch(() => null);
+    const role = await interaction.guild.roles.fetch(guildConfig.joinRoleId).catch(() => null);
+    if (!member || !role) {
+      await interaction.reply({ content: "I couldn't find that member or the configured join role.", ephemeral: true });
+      return true;
+    }
+
+    await member.roles.add(role).catch(() => null);
+    await interaction.reply({
+      content: `Added ${role} to ${member}.`,
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  if (action === "reset-modal") {
+    const scope = interaction.fields.getTextInputValue("scope").trim().toLowerCase();
     const confirm = interaction.fields.getTextInputValue("confirm");
     if (confirm !== "RESET") {
       await interaction.reply({ content: "Reset cancelled.", ephemeral: true });
       return true;
     }
 
-    manager.resetGuildState(interaction.guildId);
+    if (scope === "stats") {
+      manager.resetGuildStats(interaction.guildId);
+    } else if (scope === "schedule") {
+      manager.resetGuildSchedule(interaction.guildId);
+    } else if (scope === "roles") {
+      manager.resetGuildRoles(interaction.guildId);
+    } else if (scope === "all") {
+      manager.resetGuildState(interaction.guildId);
+    } else {
+      await interaction.reply({
+        content: "Invalid scope. Use `stats`, `schedule`, `roles`, or `all`.",
+        ephemeral: true,
+      });
+      return true;
+    }
+
     await interaction.reply({
-      ...buildPanelView(interaction, manager, store),
+      ...buildPanelView(interaction, manager, store, { view }),
       ephemeral: true,
     });
-    await interaction.followUp({ content: "Server state reset.", ephemeral: true });
+    await interaction.followUp({ content: `Reset complete for scope: ${scope}.`, ephemeral: true });
     return true;
   }
 
