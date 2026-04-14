@@ -3,7 +3,7 @@ require("dotenv").config();
 const { Client, GatewayIntentBits, Partials, REST, Routes } = require("discord.js");
 const { getRuntimeConfig } = require("./config");
 const { StateStore } = require("./state");
-const { buildCommands, handleCommand, handleComponent } = require("./commands");
+const { buildCommands, handleCommand, handleComponent, handleModal } = require("./commands");
 const { createDashboardServer } = require("./dashboard-server");
 const { DashboardService } = require("./dashboard-service");
 const { SnapManager } = require("./snap-manager");
@@ -113,6 +113,8 @@ async function main() {
     try {
       const handled = interaction.isButton()
         ? await handleComponent(interaction, manager, store)
+        : interaction.isModalSubmit()
+          ? await handleModal(interaction, manager, store)
         : await handleCommand(interaction, manager, store);
       if (!handled) {
         return;

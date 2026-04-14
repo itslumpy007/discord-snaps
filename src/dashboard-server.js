@@ -346,6 +346,26 @@ function renderDashboardHtml() {
       gap: 18px;
     }
 
+    .hero {
+      overflow: hidden;
+      position: relative;
+      background:
+        radial-gradient(circle at top right, rgba(240, 180, 77, 0.2), transparent 25%),
+        linear-gradient(160deg, rgba(255, 252, 247, 0.96), rgba(255, 241, 221, 0.88));
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -60px;
+      top: -40px;
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(219, 107, 43, 0.18), transparent 68%);
+      pointer-events: none;
+    }
+
     .hero, .panel {
       background: rgba(255, 250, 242, 0.92);
       border: 1px solid var(--line);
@@ -447,6 +467,100 @@ function renderDashboardHtml() {
       align-items: center;
     }
 
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .tab {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.55);
+      box-shadow: none;
+      color: var(--muted);
+    }
+
+    .tab.active {
+      background: linear-gradient(135deg, var(--accent), #ef9c3b);
+      color: white;
+      border-color: transparent;
+      box-shadow: var(--shadow);
+    }
+
+    .section {
+      display: grid;
+      gap: 18px;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: start;
+      margin-bottom: 12px;
+    }
+
+    .section-header p {
+      margin: 8px 0 0;
+      color: var(--muted);
+    }
+
+    .mini-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+    }
+
+    .mini-card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px;
+      background: rgba(255,255,255,0.66);
+    }
+
+    .mini-card .eyebrow {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .mini-card .big {
+      margin-top: 8px;
+      font-size: 1.15rem;
+      font-weight: 700;
+    }
+
+    .chart {
+      display: grid;
+      gap: 10px;
+    }
+
+    .chart-row {
+      display: grid;
+      gap: 6px;
+    }
+
+    .chart-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 0.92rem;
+    }
+
+    .chart-track {
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(111, 98, 86, 0.16);
+      overflow: hidden;
+    }
+
+    .chart-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent), #ef9c3b);
+    }
+
     .empty {
       color: var(--muted);
       padding: 18px;
@@ -522,13 +636,53 @@ function renderDashboardHtml() {
       </section>
 
       <section id="dashboard-content" class="hidden">
-        <div class="panel-grid two">
+        <div class="tabs">
+          <button class="tab active" data-tab="overview">Overview</button>
+          <button class="tab" data-tab="control">Control</button>
+          <button class="tab" data-tab="config">Config</button>
+          <button class="tab" data-tab="people">People</button>
+        </div>
+
+        <section id="section-overview" class="section">
+          <div class="panel-grid two">
+            <section class="panel">
+              <div class="section-header">
+                <div>
+                  <h3>Overview</h3>
+                  <p>Health signals for the current setup and automation flow.</p>
+                </div>
+              </div>
+              <div id="health-list" class="list"></div>
+            </section>
+            <section class="panel">
+              <div class="section-header">
+                <div>
+                  <h3>Live Snapshot</h3>
+                  <p>The next moment, the active state, and the current rhythm.</p>
+                </div>
+              </div>
+              <div id="snapshot-grid" class="mini-grid"></div>
+            </section>
+          </div>
           <section class="panel">
-            <h3>Overview</h3>
-            <div id="health-list" class="list"></div>
+            <div class="section-header">
+              <div>
+                <h3>Participation Mix</h3>
+                <p>A quick read on on-time, late, and missed behavior.</p>
+              </div>
+            </div>
+            <div id="ratio-chart" class="chart"></div>
           </section>
+        </section>
+
+        <section id="section-control" class="section hidden">
           <section class="panel">
-            <h3>Live Controls</h3>
+            <div class="section-header">
+              <div>
+                <h3>Live Controls</h3>
+                <p>Use these when you need to steer the daily moment in real time.</p>
+              </div>
+            </div>
             <div class="toolbar">
               <button data-action="manual-drop" class="action-button primary">Start Drop</button>
               <button data-action="close-drop" class="action-button">Close Drop</button>
@@ -547,11 +701,17 @@ function renderDashboardHtml() {
               </label>
             </div>
           </section>
-        </div>
+        </section>
 
-        <section class="panel">
-          <h3>Configuration</h3>
-          <form id="config-form" class="form-grid">
+        <section id="section-config" class="section hidden">
+          <section class="panel">
+            <div class="section-header">
+              <div>
+                <h3>Configuration</h3>
+                <p>Adjust the schedule, roles, reminders, and participation rules here.</p>
+              </div>
+            </div>
+            <form id="config-form" class="form-grid">
             <label>Snap Channel
               <select name="snapsChannelId" id="channel-select"></select>
             </label>
@@ -601,18 +761,31 @@ function renderDashboardHtml() {
           <div style="margin-top: 14px;">
             <button id="save-config-button" class="primary">Save Configuration</button>
           </div>
+          </section>
         </section>
 
-        <div class="panel-grid two">
-          <section class="panel">
-            <h3>Leaderboard</h3>
-            <div id="leaderboard-list" class="list"></div>
-          </section>
-          <section class="panel">
-            <h3>Tracked Members</h3>
-            <div id="members-list" class="list"></div>
-          </section>
-        </div>
+        <section id="section-people" class="section hidden">
+          <div class="panel-grid two">
+            <section class="panel">
+              <div class="section-header">
+                <div>
+                  <h3>Leaderboard</h3>
+                  <p>Who is consistently showing up on time.</p>
+                </div>
+              </div>
+              <div id="leaderboard-list" class="list"></div>
+            </section>
+            <section class="panel">
+              <div class="section-header">
+                <div>
+                  <h3>Tracked Members</h3>
+                  <p>Recent participation lines for everyone the bot has recorded.</p>
+                </div>
+              </div>
+              <div id="members-list" class="list"></div>
+            </section>
+          </div>
+        </section>
       </section>
     </main>
   </div>
@@ -628,6 +801,7 @@ const state = {
   guilds: [],
   selectedGuildId: null,
   overview: null,
+  activeTab: "overview",
 };
 
 const el = {
@@ -643,6 +817,8 @@ const el = {
   welcomePanel: document.getElementById("welcome-panel"),
   dashboardContent: document.getElementById("dashboard-content"),
   healthList: document.getElementById("health-list"),
+  snapshotGrid: document.getElementById("snapshot-grid"),
+  ratioChart: document.getElementById("ratio-chart"),
   leaderboardList: document.getElementById("leaderboard-list"),
   membersList: document.getElementById("members-list"),
   channelSelect: document.getElementById("channel-select"),
@@ -661,6 +837,13 @@ const el = {
   refreshButton: document.getElementById("refresh-button"),
   downloadButton: document.getElementById("download-button"),
   extendMinutes: document.getElementById("extend-minutes"),
+  tabs: [...document.querySelectorAll(".tab")],
+  sections: {
+    overview: document.getElementById("section-overview"),
+    control: document.getElementById("section-control"),
+    config: document.getElementById("section-config"),
+    people: document.getElementById("section-people"),
+  },
 };
 
 document.getElementById("login-button").addEventListener("click", () => {
@@ -676,6 +859,12 @@ document.getElementById("save-config-button").addEventListener("click", saveConf
 document.getElementById("extend-button").addEventListener("click", async () => {
   await runAction("extend-drop", { minutes: el.extendMinutes.value });
 });
+for (const tab of el.tabs) {
+  tab.addEventListener("click", () => {
+    state.activeTab = tab.dataset.tab;
+    renderTabs();
+  });
+}
 el.refreshButton.addEventListener("click", () => loadOverview(state.selectedGuildId));
 el.downloadButton.addEventListener("click", () => {
   if (state.selectedGuildId) {
@@ -745,6 +934,16 @@ function renderAuthState() {
   el.userMeta.textContent = "Discord admin session";
 }
 
+function renderTabs() {
+  for (const tab of el.tabs) {
+    tab.classList.toggle("active", tab.dataset.tab === state.activeTab);
+  }
+
+  for (const [name, section] of Object.entries(el.sections)) {
+    section.classList.toggle("hidden", name !== state.activeTab);
+  }
+}
+
 function renderGuilds() {
   el.guildList.innerHTML = "";
 
@@ -775,6 +974,7 @@ function renderOverview() {
   el.welcomePanel.classList.add("hidden");
   el.dashboardContent.classList.remove("hidden");
   el.downloadButton.classList.remove("hidden");
+  renderTabs();
 
   el.heroTitle.textContent = data.guild.name;
   el.heroSubtitle.textContent =
@@ -799,6 +999,39 @@ function renderOverview() {
     <div class="list-item">
       <strong>\${check.label}</strong>
       <span class="badge \${check.ok ? "ok" : "bad"}">\${check.ok ? "Healthy" : "Needs attention"}</span>
+    </div>
+  \`).join("");
+
+  const snapshot = [
+    { eyebrow: "Next Drop", big: data.config.nextScheduledDropTs ? new Date(data.config.nextScheduledDropTs * 1000).toLocaleTimeString() : "Not scheduled" },
+    { eyebrow: "Daily Window", big: \`\${data.config.dailyWindowStartHourLocal}:00-\${data.config.dailyWindowEndHourLocal}:59\` },
+    { eyebrow: "Drops / Day", big: String(data.config.dropsPerDay) },
+    { eyebrow: "Duration", big: \`\${data.config.dropDurationMinutes} min\` },
+    { eyebrow: "Automation", big: data.config.enabled ? "Enabled" : "Paused" },
+    { eyebrow: "Active", big: data.currentDrop ? "Live now" : "Idle" },
+  ];
+  el.snapshotGrid.innerHTML = snapshot.map((item) => \`
+    <div class="mini-card">
+      <div class="eyebrow">\${item.eyebrow}</div>
+      <div class="big">\${item.big}</div>
+    </div>
+  \`).join("");
+
+  const totals = [
+    { label: "On-Time", value: data.stats.totalOnTime },
+    { label: "Late", value: data.stats.totalLate },
+    { label: "Missed", value: data.stats.totalMissed },
+  ];
+  const maxTotal = Math.max(1, ...totals.map((item) => item.value));
+  el.ratioChart.innerHTML = totals.map((item) => \`
+    <div class="chart-row">
+      <div class="chart-meta">
+        <strong>\${item.label}</strong>
+        <span>\${item.value}</span>
+      </div>
+      <div class="chart-track">
+        <div class="chart-fill" style="width:\${Math.max(6, Math.round((item.value / maxTotal) * 100))}%"></div>
+      </div>
     </div>
   \`).join("");
 
