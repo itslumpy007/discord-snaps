@@ -324,9 +324,14 @@ class SnapManager {
     const isLate = unixNow() > drop.endTs;
     const displayName = message.member?.displayName || message.author.username;
     const dayKey = utcDateKeyFromUnix(drop.endTs);
+    const mirroredMessageId =
+      message.channel.id === drop.threadId
+        ? await this.mirrorSubmissionToChannel(message, drop, displayName, isLate)
+        : null;
 
     drop.submissions[message.author.id] = {
       messageId: message.id,
+      mirroredMessageId,
       submittedAtTs: unixNow(),
       displayName,
       late: isLate,
@@ -373,6 +378,44 @@ class SnapManager {
       .catch(() => {});
 
     return true;
+  }
+
+  async mirrorSubmissionToChannel(message, drop, displayName, isLate) {
+    if (drop.channelId === message.channel.id) {
+      return null;
+    }
+
+    const channel = await message.guild.channels.fetch(drop.channelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) {
+      return null;
+    }
+
+    const attachmentFiles = [...message.attachments.values()].map((attachment, index) => ({
+      attachment: attachment.url,
+      name: attachment.name || `snap-${index + 1}`,
+    }));
+
+    const embed = buildBaseEmbed(`${displayName}'s Snap`)
+      .setDescription(
+        [
+          `${message.author} posted${isLate ? " late" : " on time"} in <#${drop.threadId}>.`,
+          message.content ? `\n${message.content}` : "",
+          `\n[Open thread post](${message.url})`,
+        ].join("")
+      )
+      .addFields(
+        { name: "Status", value: isLate ? "Late" : "On-Time", inline: true },
+        { name: "Submitted", value: `<t:${unixNow()}:T>`, inline: true }
+      );
+
+    const mirrored = await channel
+      .send({
+        embeds: [embed],
+        files: attachmentFiles,
+      })
+      .catch(() => null);
+
+    return mirrored?.id || null;
   }
 
   async snoozeMember(interaction) {
